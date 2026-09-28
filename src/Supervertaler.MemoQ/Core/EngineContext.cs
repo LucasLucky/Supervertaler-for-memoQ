@@ -785,7 +785,7 @@ namespace Supervertaler.MemoQ.Core
 
                     var usage = client.LastUsage;
                     PluginLog.Write("SuperMemory: asked " + general.Model + " which of "
-                        + request.Candidates.Count + " articles this document needs"
+                        + request.Candidates.Count + " articles and house rules this document needs"
                         + (usage == null ? "" : " | tokens: in " + usage.RegularInputTokens.ToString("N0")
                                                + " out " + usage.OutputTokens.ToString("N0")));
 
