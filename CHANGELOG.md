@@ -1,13 +1,12 @@
 ﻿# Changelog
 
-Supervertaler for memoQ is pre-release: nothing below has shipped to anyone yet.
-This first entry summarises what exists today; from here on, every change to
-user-visible behaviour gets a line in the same commit that makes it. The shape
+Every change to user-visible behaviour gets a line here, in the same commit
+that makes it. The first entry, 0.1.0, is the first public release. The shape
 matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
-## [Unreleased] – 2026-09-16
+## [0.1.0] – 2026-09-28
 
 ### Changed
 
