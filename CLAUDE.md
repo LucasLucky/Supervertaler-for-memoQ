@@ -6,8 +6,9 @@ A memoQ add-in that brings Supervertaler's AI translation into memoQ. It is **no
 a port of Supervertaler for Trados — memoQ's plugin model is far narrower, and the
 feature set has to be re-shaped around it rather than carried across.
 
-Status: **vertical slice**. One MT engine, segment-by-segment and batch, with an
-options dialog. Everything else is still ahead.
+Status: **released**. v0.1.0 was published on GitHub on 2026-09-28, for memoQ 12
+(untested on 11). It is unsigned; signing with memoQ has not started. How a
+release is cut is under "Releasing" in the Distribution section.
 
 ## The constraint that shapes everything
 
@@ -508,6 +509,26 @@ verified against a key baked into memoQ. Unsigned genuinely works: memoQ's own
 interface exists, so an approval prompt does happen in some configurations — it
 simply did not fire here. Do not treat the absence of a warning as a sign that
 something is wrong.
+
+### Releasing
+
+`python tools/release.py` checks, builds the installer and writes the notes, and
+publishes nothing. `python tools/release.py --publish` does the same and then
+publishes on GitHub, which Michael chose as the host on 2026-09-28. **Publishing
+needs his explicit go-ahead in chat, every time.**
+
+- **Stamp the changelog first.** `--publish` refuses unless the heading is
+  `## [<version>] – <date>`, committed and pushed. New work then goes under a
+  fresh `## [Unreleased]`.
+- **Draft first, public last.** The release is created as a draft, the files are
+  uploaded and their sizes read back, and only then is it made public. A failed
+  upload leaves an invisible draft, never a public release with a broken installer.
+- **The installer is also uploaded under a fixed name,**
+  `Supervertaler-for-memoQ-Setup.exe`, because supervertaler.com/download/memoq
+  points at `releases/latest/download/<that name>`. Renaming it breaks every
+  download link.
+- The version lives in all four csproj files and must agree. `release.py`
+  refuses when it does not.
 
 **Installation needs administrator rights** — the `Addins` folder is under Program
 Files and there is no per-user equivalent. The path is version-stamped

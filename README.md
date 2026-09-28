@@ -9,10 +9,10 @@ Claude Desktop translate your live project.
 Companion to [Supervertaler for Trados](https://github.com/Supervertaler/Supervertaler-for-Trados),
 sharing its code through [Supervertaler-Plugin-Core](https://github.com/Supervertaler/Supervertaler-Plugin-Core).
 
-> **Status: working, pre-release.** Translates, batches, learns, drafts prompts,
-> serves terminology and memory banks, and connects to Claude Desktop. Distributed
-> as unsigned DLLs for now; a signed build and an installer are the remaining steps
-> to a release. What exists is listed in [`CHANGELOG.md`](CHANGELOG.md).
+> **Status: released.** Version 0.1.0 came out on 28 September 2026, for memoQ 12.
+> Download the installer from [supervertaler.com/download/memoq](https://supervertaler.com/download/memoq);
+> a 14-day trial starts by itself. The add-in is not yet signed by memoQ, so memoQ
+> may ask once whether to load it. What each version changed is in [`CHANGELOG.md`](CHANGELOG.md).
 
 Documentation: [docs.supervertaler.com/memoq](https://docs.supervertaler.com/memoq/)
 
