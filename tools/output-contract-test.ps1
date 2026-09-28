@@ -56,6 +56,13 @@ Check ($null -ne (Problem $src ($nl + ' (the fuzzy match said otherwise)'))) 'a 
 Check ($null -eq (Problem $src $nl)) 'a clean translation passes'
 Check ($null -eq (Problem 'Specification of anchor bolts' 'Specificatie van ankerbouten')) 'a clean short segment passes'
 
+# Into English, a first-person source is translated, not commented on.
+$decl   = 'Ik verklaar dat ik het bijgevoegde document naar beste weten heb vertaald.'
+$declEn = 'I declare that I have translated the attached document to the best of my knowledge.'
+Check ($null -eq (Problem $decl $declEn)) 'a first-person declaration translated into English passes'
+Check ($null -ne (Problem $decl ($declEn + ' I kept "naar beste weten" literal.'))) 'the same with a remark appended is still refused'
+Check ($null -ne (Problem 'Het apparaat is getest.' 'The device was tested (I kept the passive).')) 'an aside on a source with no "I" is still refused'
+
 # The one sanctioned place for a comment.
 Check ($null -eq (Problem $src ($nl + ' [[TC: "areas" read as regions, not surfaces. Please check.]]'))) 'one trailing [[TC]] marker passes'
 Check ($null -eq (Problem $src ($nl + ' ' + [char]0x27E6 + 'TC: older bracket form' + [char]0x27E7))) 'the older bracket form passes too'
