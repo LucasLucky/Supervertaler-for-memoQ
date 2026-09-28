@@ -78,7 +78,7 @@ namespace Supervertaler.PromptEditor
     /// </summary>
     internal sealed class LicenceDialog : Form
     {
-        private const string BuyUrl = "https://supervertaler.com";
+        private const string BuyUrl = "https://supervertaler.com/pricing/";
 
         private readonly TextBox _key;
 

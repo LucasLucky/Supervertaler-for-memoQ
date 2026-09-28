@@ -2,6 +2,7 @@
 """Prepare a release of Supervertaler for memoQ.
 
     python tools/release.py            # check everything, build, write the notes
+    python tools/release.py --publish  # the same, then publish it on GitHub
 
 Refuses rather than warns. Each check below exists because the thing it guards
 against has happened in one of the Supervertaler repositories:
@@ -19,9 +20,21 @@ against has happened in one of the Supervertaler repositories:
 - the notes name no client, because a real job reference once reached a
   public page through exactly this kind of text.
 
-PUBLISHING IS NOT HERE YET, deliberately. Where the installer is hosted is
-still Michael's decision, and it changes what publishing means - so this
-stops at a verified installer and the notes, and says so.
+Publishing (Michael, 2026-09-28: the installer is hosted on GitHub). A
+release is created as a DRAFT, the files are uploaded to it and read back,
+and only then is it made public. A failed upload therefore leaves an
+invisible draft rather than a public release with a missing or partial
+installer - the one failure a customer would meet - and says where the
+draft is, so it can be finished or deleted.
+
+The installer goes up under a FIXED name, Supervertaler-for-memoQ-Setup.exe,
+so https://supervertaler.com/download/memoq can point at
+releases/latest/download/<that name> and start the download in one click,
+for every future version, without the website changing again.
+
+Publishing also requires the changelog to carry the release under its own
+dated heading, "## [0.1.0] - 2026-09-28", committed and pushed: the
+changelog is the record of what shipped when.
 """
 import io
 import re
@@ -30,6 +43,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+GITHUB_REPO = "Supervertaler/Supervertaler-for-memoQ"
+FIXED_SETUP_NAME = "Supervertaler-for-memoQ-Setup.exe"
 CHANGELOG = REPO / "CHANGELOG.md"
 DIST = REPO / "dist"
 
@@ -57,9 +72,14 @@ def versions():
     return found
 
 
-def unreleased_section(text):
-    m = re.search(r"^## \[Unreleased\][^\n]*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
-    return m.group(1).strip() if m else ""
+def changelog_section(text, version):
+    """The release's own section - "## [<version>] - <date>" once the changelog
+    is stamped for it, otherwise [Unreleased]. Returns (heading, body)."""
+    for label in (re.escape(version), "Unreleased"):
+        m = re.search(r"^(## \[" + label + r"\][^\n]*)\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+    return "", ""
 
 
 def highlights(section):
@@ -69,6 +89,11 @@ def highlights(section):
 
 
 def main():
+    publish = "--publish" in sys.argv[1:]
+    unknown = [a for a in sys.argv[1:] if a != "--publish"]
+    if unknown:
+        fail("unknown option: " + " ".join(unknown))
+
     print("== versions")
     v = versions()
     if not v:
@@ -92,11 +117,14 @@ def main():
     print(f"   clean, pushed at {head[:7]}, {tag} is new")
 
     print("== changelog")
-    section = unreleased_section(CHANGELOG.read_text(encoding="utf-8-sig"))
+    heading, section = changelog_section(CHANGELOG.read_text(encoding="utf-8-sig"), version)
     if not section:
-        fail("the [Unreleased] section of CHANGELOG.md is empty or missing")
+        fail(f"CHANGELOG.md has no [{version}] or [Unreleased] section, or it is empty")
+    if publish and not re.match(r"## \[" + re.escape(version) + r"\] [-–] \d{4}-\d{2}-\d{2}$", heading):
+        fail(f"to publish, the changelog heading must be '## [{version}] – <date>', committed and "
+             f"pushed; it is '{heading}'")
     stars = highlights(section)
-    print(f"   {len(section.splitlines())} lines, {len(stars)} highlights")
+    print(f"   {heading}: {len(section.splitlines())} lines, {len(stars)} highlights")
 
     print("== build (no deploy)")
     b = run(["bash", "build.sh", "--no-deploy"])
@@ -165,8 +193,69 @@ def main():
     out.write_text(notes, encoding="utf-8")
     print(f"   {out.name}")
 
-    print(f"\nReady: {tag}. Nothing has been published.")
-    print("Publishing waits on where the installer is hosted, which is not decided yet.")
+    if not publish:
+        print(f"\nReady: {tag}. Nothing has been published.")
+        print("To publish it on GitHub: python tools/release.py --publish")
+        return
+
+    publish_release(tag, version, head, setup, zipped, out)
+
+
+def gh(args):
+    r = subprocess.run(["gh"] + args, cwd=REPO, capture_output=True, text=True)
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def published_sizes(tag):
+    """name -> (size, state) for every file on the release, or None."""
+    code, text = gh(["release", "view", tag, "--repo", GITHUB_REPO, "--json", "assets",
+                     "--jq", '.assets[] | [.name, .size, .state] | @tsv'])
+    if code != 0:
+        return None
+    seen = {}
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3:
+            seen[parts[0]] = (int(parts[1]), parts[2])
+    return seen
+
+
+def publish_release(tag, version, head, setup, zipped, notes):
+    print("== publish")
+    drafts = f"https://github.com/{GITHUB_REPO}/releases"
+
+    # The fixed-name copy sits beside the versioned one, so dist/ still says
+    # which version each file is.
+    fixed = DIST / FIXED_SETUP_NAME
+    fixed.write_bytes(setup.read_bytes())
+    uploads = [fixed, zipped]
+
+    code, text = gh(["release", "create", tag, "--repo", GITHUB_REPO, "--draft",
+                     "--target", head, "--title", f"Supervertaler for memoQ {version}",
+                     "--notes-file", str(notes)] + [str(f) for f in uploads])
+    if code != 0:
+        fail(f"creating the draft failed. If a draft was left behind it is invisible; finish or "
+             f"delete it at {drafts}\n" + text[-1500:])
+    print(f"   draft {tag} created with {len(uploads)} files")
+
+    # Read the uploads back: a draft whose installer is missing or short must
+    # not become the release every download link points at.
+    seen = published_sizes(tag)
+    if seen is None:
+        fail(f"could not read the draft back. It is still a draft and invisible: {drafts}")
+    for f in uploads:
+        size, state = seen.get(f.name, (None, None))
+        if size != f.stat().st_size or state != "uploaded":
+            fail(f"{f.name} on GitHub is {size} bytes ({state}), here {f.stat().st_size}. "
+                 f"The release is still a draft and invisible: {drafts}")
+        print(f"   {f.name}: {size:,} bytes, matches")
+
+    code, text = gh(["release", "edit", tag, "--repo", GITHUB_REPO, "--draft=false", "--latest"])
+    if code != 0:
+        fail(f"the draft is complete but could not be made public; do it at {drafts}\n" + text[-800:])
+
+    print(f"\nPublished: https://github.com/{GITHUB_REPO}/releases/tag/{tag}")
+    print(f"Direct download: https://github.com/{GITHUB_REPO}/releases/latest/download/{FIXED_SETUP_NAME}")
 
 
 if __name__ == "__main__":
