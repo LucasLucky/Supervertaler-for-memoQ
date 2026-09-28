@@ -35,6 +35,8 @@ any release tooling that buckets on these headings works for both.
 
 ### Fixed
 
+- **An empty cell in `figures.md` is now marked with an en dash** rather than an em dash, in line with the rest of Supervertaler’s text. Shared with Supervertaler for Trados.
+
 - **A first-person sentence translated into English was refused as a note from the model.** The reply check treats “I kept…”, “I have translated…” and the like as the model talking about its own work, which is right for a note and wrong for a declaration: “Ik verklaar dat ik … heb vertaald” translated faithfully was refused twice and the row left empty. The check now lets it through when the source has its own word for “I” and the translation has no more sentences or brackets than the source – so the declaration is kept, while a remark added after a translation is still refused. One case is still refused: a source that leaves the pronoun out, as Spanish or Italian often do (“He traducido…”); the row is left for you with the reason shown under it. Shared with Supervertaler for Trados.
 
 - **The built-in prompts only ever arrived through Supervertaler for Trados.** memoQ read the shared prompt library but never put Supervertaler's own prompts in it, so on a computer without the Trados plugin there was no Default Translation Prompt to choose – and updates to the built-in prompts never arrived either. memoQ now puts them in place when it loads Supervertaler, and the editor does when it starts. Only what is missing is written, and only an unedited built-in prompt is ever updated.
