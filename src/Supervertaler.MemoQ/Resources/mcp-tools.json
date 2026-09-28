@@ -711,11 +711,11 @@
           },
           "q": {
             "type": "string",
-            "description": "Optional. Bias retrieval towards this text, e.g. the term being asked about."
+            "description": "Optional free text about what you are working on. It does not change what is returned: the whole bank is loaded, up to tokenBudget. To find a particular note, use search_supermemory."
           },
           "domain": {
             "type": "string",
-            "description": "Optional subject-matter hint, e.g. \"patent\"."
+            "description": "Optional label, e.g. \"legal\" or \"medical\", echoed back in the response's domain field. The bank is not filtered by domain."
           },
           "tokenBudget": {
             "type": "integer",

@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Fixed
+
+- **The memory bank tool no longer promises a filter it does not apply.** The Claude and ChatGPT tool that reads a memory bank said its query "biases retrieval" and took a subject-matter hint, but the bank is always read as a whole, whatever is passed. The descriptions now say so, and point to the search tool for finding a particular note; an empty bank is reported as having no content to load, rather than none "for this project, domain or language pair". Shared with Supervertaler for Trados.
+
 ## [0.1.0] – 2026-09-28
 
 ### Changed

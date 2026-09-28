@@ -137,13 +137,12 @@ namespace Supervertaler.MemoQ.Core
                     Available = false,
                     Bank = bankName,
                     Domain = domain,
-                    Note = "The bank \"" + bankName + "\" has no content for this project, domain or language pair."
+                    Note = "The bank \"" + bankName + "\" has no content to load."
                 };
             }
 
             var sources = new List<string>();
             if (!string.IsNullOrEmpty(ctx.ClientProfilePath)) sources.Add(ctx.ClientProfilePath);
-            if (!string.IsNullOrEmpty(ctx.DomainArticlePath)) sources.Add(ctx.DomainArticlePath);
             if (!string.IsNullOrEmpty(ctx.StyleGuidePath)) sources.Add(ctx.StyleGuidePath);
             if (ctx.TerminologyPaths != null) sources.AddRange(ctx.TerminologyPaths);
             if (ctx.ExtraPaths != null) sources.AddRange(ctx.ExtraPaths);
