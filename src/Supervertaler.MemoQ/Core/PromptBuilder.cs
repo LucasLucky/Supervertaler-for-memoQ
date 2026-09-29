@@ -2,6 +2,7 @@ using System;
 using Supervertaler.Core;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using MemoQ.Addins.Common.DataStructures;
 using MemoQ.MTInterfaces;
@@ -455,6 +456,17 @@ namespace Supervertaler.MemoQ.Core
             sb.AppendLine();
         }
 
+        /// <summary>
+        /// memoQ's name for the forbidden-term context kind, or null where the
+        /// running memoQ has none. memoQ 12 added ContextKinds.ForbiddenTerm;
+        /// memoQ 11's interface lacks it, and naming the field directly made
+        /// every translation there fail with a MissingFieldException before it
+        /// reached the model. Looked up once, by name, so the method compiles
+        /// against either.
+        /// </summary>
+        private static readonly string ForbiddenTermKind =
+            typeof(ContextKinds).GetField("ForbiddenTerm", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as string;
+
         private static void AppendForbiddenTerms(
             StringBuilder sb, TranslationBundle bundle, IReadOnlyList<TermIndex.Match> ownTerms)
         {
@@ -462,10 +474,14 @@ namespace Supervertaler.MemoQ.Core
                 ? Enumerable.Empty<string>()
                 : ownTerms.Where(x => x?.Entry != null && x.Entry.Forbidden).Select(x => x.Entry.Target);
 
-            var forbidden = own.Concat(PlainTextOfKind(bundle, ContextKinds.ForbiddenTerm)
-                .Select(i => (i.Text2 ?? i.Text1 ?? string.Empty).Trim()))
-                .Concat(SegmentsOfKind(bundle, ContextKinds.ForbiddenTerm)
-                    .Select(s => TagBridge.ToPlainText(s.TargetSegment ?? s.SourceSegment).Trim()))
+            var fromMemoQ = ForbiddenTermKind == null
+                ? Enumerable.Empty<string>()
+                : PlainTextOfKind(bundle, ForbiddenTermKind)
+                    .Select(i => (i.Text2 ?? i.Text1 ?? string.Empty).Trim())
+                    .Concat(SegmentsOfKind(bundle, ForbiddenTermKind)
+                        .Select(s => TagBridge.ToPlainText(s.TargetSegment ?? s.SourceSegment).Trim()));
+
+            var forbidden = own.Concat(fromMemoQ)
                 .Where(t => t.Length > 0)
                 .Distinct()
                 .ToList();

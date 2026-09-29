@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Fixed
+
+- **Translation works in memoQ 11.** Every request failed there before reaching the AI, and memoQ showed nothing, because Supervertaler asked for a kind of context – forbidden terms – that memoQ added in version 12. It now uses that kind only where memoQ has it. memoQ 11 does not send forbidden terms, so nothing is lost; your own termbases' forbidden terms still reach the model.
+
 ## [0.1.2] – 2026-09-29
 
 ### Added
