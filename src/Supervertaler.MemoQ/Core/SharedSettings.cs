@@ -60,6 +60,7 @@ namespace Supervertaler.MemoQ.Core
         private const string UsageStatsKey = "usagestats";
         private const string UsageStatsIdKey = "usagestats.id";
         private const string UsageStatsAskedKey = "usagestats.asked";
+        private const string UpdateSkippedKey = "updateskip";
         private const string PromptPathKey = "promptpath";
         private const string ApiKeyKey = "apikey";
         private const string SourceLangKey = "langsource";
@@ -287,6 +288,13 @@ namespace Supervertaler.MemoQ.Core
 
         /// <summary>The random id the ping carries. Empty until the translator says yes.</summary>
         public static string UsageStatsId => StringOr(UsageStatsIdKey, string.Empty);
+
+        /// <summary>
+        /// A release the translator chose to skip in the editor's update dialog;
+        /// neither the dialog nor the notice on memoQ's hits offers it again. A
+        /// later release is offered as usual. Written by the editor only.
+        /// </summary>
+        public static string UpdateSkipped { get => StringOr(UpdateSkippedKey, string.Empty); set => Write(UpdateSkippedKey, value ?? string.Empty); }
 
         /// <summary>Whether the editor has asked the question, so it is asked once.</summary>
         public static bool UsageStatsAsked => BoolOr(UsageStatsAskedKey, false);

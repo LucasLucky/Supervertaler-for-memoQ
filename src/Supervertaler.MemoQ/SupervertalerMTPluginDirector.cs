@@ -77,6 +77,13 @@ namespace Supervertaler.MemoQ
             // failure (see Stats).
             Core.Stats.OnStart(PluginLog.Write);
 
+            // Whether a newer release exists, at most once a day and in the
+            // background; the answer is what puts a notice on the Info line of
+            // Supervertaler's hits for someone who never opens the editor (see
+            // UpdateCheck).
+            if (!Core.SharedSettings.InHarness)
+                System.Threading.Tasks.Task.Run(() => Core.UpdateCheck.LatestAsync(force: false));
+
             // Here rather than in the engine constructor: memoQ builds an engine
             // only for a project that uses the MT plugin, so a project whose
             // manager has switched MT plugins off never started the bridge - and

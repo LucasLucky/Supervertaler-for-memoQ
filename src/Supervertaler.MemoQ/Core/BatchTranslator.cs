@@ -487,7 +487,7 @@ namespace Supervertaler.MemoQ.Core
                 results[i] = new TranslationResult
                 {
                     Translation = TagBridge.FromTaggedText(match?.Translation?.Trim(), chunk[i]),
-                    Info = general.Provider + " / " + general.Model
+                    Info = general.Provider + " / " + general.Model + UpdateCheck.InfoSuffix()
                 };
             }
 

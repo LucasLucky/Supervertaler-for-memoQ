@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Added
+
+- ★ **Supervertaler tells you when there is a new version, and installs it.** Until now nothing did, so a copy installed once stayed on that version until you happened to download again. Once a day Supervertaler asks GitHub whether a newer version has been released. When there is one, the editor offers it as it opens – **What's new**, **Download and install**, **Skip this version** or **Later** – and **Help, Check for updates** asks at any time. Download and install fetches the installer, checks it is exactly the file GitHub published (its size and its SHA-256 checksum) before running it, and closes the editor so its own file can be replaced; close memoQ first. For anyone who never opens the editor, the line under Supervertaler's hits in memoQ's Translation results says that a new version is available, until it is installed or skipped. The check sends nothing about you – only a request for the latest version, with a generic program name – and never slows memoQ down.
+
 ## [0.1.1] – 2026-09-29
 
 ### Added

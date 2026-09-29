@@ -361,6 +361,10 @@ namespace Supervertaler.PromptEditor
             {
                 ToolTipText = "The Supervertaler licence on this computer, shared with Supervertaler for Trados."
             });
+            helpMenu.DropDownItems.Add(new ToolStripMenuItem("Check for &updates…", null, async (s, e) => await CheckForUpdatesAsync(userAsked: true))
+            {
+                ToolTipText = "Whether a newer Supervertaler for memoQ has been released."
+            });
 
             menu.Items.AddRange(new ToolStripItem[] { fileMenu, memoqMenu, settingsMenu, helpMenu });
 
@@ -748,10 +752,47 @@ namespace Supervertaler.PromptEditor
 
                 ShowLicenceNotices();
                 AskUsageStatsOnce();
+                _ = CheckForUpdatesAsync(userAsked: false);
             };
 
             SetEditingEnabled(false);
             _status.Text = SupervertalerPaths.PromptLibraryDir;
+        }
+
+        // -- updates -------------------------------------------------------------
+
+        /// <summary>
+        /// Offers a newer release (see UpdateCheck). On opening it is quiet about
+        /// everything but an update - no "you are up to date", nothing when GitHub
+        /// cannot be reached - and respects a skipped version; asked from the Help
+        /// menu it always answers, and offers even a skipped one.
+        /// </summary>
+        private async System.Threading.Tasks.Task CheckForUpdatesAsync(bool userAsked)
+        {
+            if (SharedSettings.InHarness) return;
+
+            var latest = await UpdateCheck.LatestAsync(force: userAsked);
+            if (IsDisposed) return;
+
+            var current = UpdateCheck.CurrentVersion();
+            var offer = UpdateCheck.Offer(latest, current, userAsked ? null : SharedSettings.UpdateSkipped);
+            if (offer == null)
+            {
+                if (!userAsked) return;
+                MessageBox.Show(this,
+                    latest == null
+                        ? "Supervertaler could not reach GitHub to check for updates. Check your internet connection and try again."
+                        : "You have the latest version of Supervertaler for memoQ (" + current + ").",
+                    "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var dialog = new UpdateDialog(offer, current))
+            {
+                dialog.ShowDialog(this);
+                // The installer replaces this program's own file.
+                if (dialog.InstallerStarted) Close();
+            }
         }
 
         // -- usage statistics ------------------------------------------------

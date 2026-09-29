@@ -20,7 +20,7 @@
     <Product>Supervertaler for memoQ</Product>
     <Description>Prompts, glossary and settings for Supervertaler for memoQ</Description>
     <Copyright>Copyright (c) 2026 Michael Beijer</Copyright>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <InformationalVersion>0.1.0</InformationalVersion>
     <ApplicationIcon>..\Supervertaler.MemoQ\Resources\sv-icon.ico</ApplicationIcon>
     <!-- Declares DPI awareness, so the window is not bitmap-stretched into
@@ -129,6 +129,9 @@
     </Compile>
     <Compile Include="..\Supervertaler.MemoQ\Core\Licence.cs">
       <Link>Shared\Licence.cs</Link>
+    </Compile>
+    <Compile Include="..\Supervertaler.MemoQ\Core\UpdateCheck.cs">
+      <Link>Shared\UpdateCheck.cs</Link>
     </Compile>
     <Compile Include="..\Supervertaler.MemoQ\Core\DefaultPrompts.cs">
       <Link>Shared\DefaultPrompts.cs</Link>
