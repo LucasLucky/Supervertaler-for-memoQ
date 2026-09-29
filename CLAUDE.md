@@ -871,6 +871,28 @@ Anything written about the licence in this public repository states the policy,
 never how it resists tampering. See "Security defects are never written up in
 public" above.
 
+## Usage statistics and trial registration (0.1.1, 2026-09-29)
+
+`Core/Stats.cs`, started once per memoQ session from the director's
+`Initialize`, makes two background calls to Michael's stats Worker
+(`supervertaler-stats` repo, the "Beijer Dashboard"). Both mirror Trados, so
+one dashboard shows both products. Both are silent on failure and never run
+under a harness.
+
+- **The usage ping is genuinely opt-in.** The editor asks once, in a Yes/No
+  box that can't be dismissed without an answer, and Settings has a checkbox.
+  It sends only the fields the privacy policy lists: id, product `memoq`,
+  plugin version, OS, memoQ version (in the `trados_version` field, which the
+  dashboard labels by product) and locale. `tools/stats-test.ps1` fails if a
+  field is added. **Change the privacy page first** if one ever is.
+- **The editor is the only writer of the id** (`SharedSettings.SetUsageStats`).
+  The plugin only reads, so two processes can never mint two ids for one install.
+- **The trial registration is licensing, not statistics**, so it is not
+  optional, exactly as in Trados. It runs only while there is no key, and sends
+  core's `MachineId` fingerprint with product `memoq`. The Worker keeps one row
+  per fingerprint, because the trial is one per computer across both plugins,
+  plus a `products` list.
+
 ## Confidentiality
 
 Same rule as the Trados repo: **never use real client names.** `Acme` for a client,
