@@ -6,9 +6,10 @@ A memoQ add-in that brings Supervertaler's AI translation into memoQ. It is **no
 a port of Supervertaler for Trados — memoQ's plugin model is far narrower, and the
 feature set has to be re-shaped around it rather than carried across.
 
-Status: **released**, first as v0.1.0 on 2026-09-28, then v0.1.1 on 2026-09-29
-(opt-in usage ping and trial registration). For memoQ 12, untested on 11. The
-current version is in CHANGELOG.md and on GitHub's releases/latest. It is unsigned; signing with memoQ has not started. How a
+Status: **released**, first as v0.1.0 on 2026-09-28. For **memoQ 11 and 12** since
+v0.1.3 (2026-09-29); memoQ 10 and older are untested, and the installer leaves them
+alone. See "memoQ 11" under Tech stack. The current version is in CHANGELOG.md and on
+GitHub's releases/latest. It is unsigned; signing with memoQ has not started. How a
 release is cut is under "Releasing" in the Distribution section.
 
 ## The constraint that shapes everything
@@ -353,8 +354,17 @@ attached, by name.
 
 - **C# / .NET Framework 4.8, x64, WinForms** — must match memoQ.exe exactly; the
   add-in loads into its AppDomain.
-- memoQ 12 is `12.4.53`. `MemoQ.MTInterfaces` is assembly version `3.0.0.0`,
-  `MemoQ.TBInterfaces` / `MemoQ.TMInterfaces` are `2.0.0.0`.
+- memoQ 12 is `12.5.20` here, built against as the newest memoQ found.
+  `MemoQ.MTInterfaces` is assembly version `3.0.0.0`, and `MemoQ.TBInterfaces` /
+  `MemoQ.TMInterfaces` are `2.0.0.0`.
+- **memoQ 11** (11.6.10) ships older interfaces: MTInterfaces 1.4.7, TBInterfaces 1.2,
+  Addins.Common 1.5.3. None is strong-named, so the version gap does not stop loading;
+  a MISSING MEMBER does. The one that bit was `ContextKinds.ForbiddenTerm`, which is new
+  in 12. It made every request throw MissingFieldException in 11, and it is now looked
+  up by name (PromptBuilder.ForbiddenTermKind). **Anything new from memoQ's interfaces
+  must be treated the same way.** Check with
+  `tools/smoketest.ps1 -MemoQPath 'C:\Program Files\memoQ\memoQ-11'`, then use it live.
+  memoQ 11 also lacks Microsoft.Data.Sqlite (see "Dependencies").
 - Build: `bash build.sh` (build → smoke test → deploy).
 - No NuGet packages, deliberately — see "Dependencies" below.
 
@@ -485,10 +495,27 @@ recorded in the Trados plugin's `CLAUDE.md` as the cause of
 `EntryPointNotFoundException` there. We would now be loading *into that process*.
 
 So: every memoQ reference is `Private=false`, and the slice has zero NuGet packages.
-JSON parsing uses memoQ's own `MemoQ.Addins.Common.Utils.JSON`. When
-`Supervertaler.Core` arrives with `Microsoft.Data.Sqlite`, the Trados plugin's
-`AppInitializer` trick (pre-load `e_sqlite3.dll` by full path, handle
-`AssemblyResolve` for every shipped managed DLL) becomes mandatory, not optional.
+JSON parsing uses memoQ's own `MemoQ.Addins.Common.Utils.JSON`. The termbases use
+`Microsoft.Data.Sqlite`, borrowed from memoQ 12's own folder like everything else.
+
+**The one exception: SQLite for memoQ 11 (v0.1.3).** memoQ 11 ships System.Data.SQLite
+but not Microsoft.Data.Sqlite. So the installer adds, only to a memoQ whose folder
+lacks `Microsoft.Data.Sqlite.dll`:
+- Microsoft.Data.Sqlite 9.0.3 and SQLitePCLRaw core, batteries_v2 and
+  provider.dynamic_cdecl 2.1.10, all in `Addins`;
+- the native `e_sqlite3.dll` in **`Addins\runtimes\win-x64\native`**.
+
+These are memoQ 12's own versions: the NuGet builds are byte-identical, fetched by
+`tools/sqlite-redist/fetch.csproj` and pinned by SHA-256 in `build-installer.sh`.
+Two things were learned the hard way:
+- **Never put a native DLL loose in `Addins`.** memoQ's ModuleManager calls
+  `Assembly.LoadFrom` on every `.dll` there at start-up, and a native one fails with
+  BadImageFormatException. SQLitePCLRaw finds it under `runtimes\win-<arch>\native`
+  beside itself, which the scan does not enter.
+- **No resolver code is needed.** memoQ 11's probing covers `Addins`, and its config
+  already redirects System.Memory and friends to versions that satisfy these libraries.
+
+memoQ 12 is never given a second copy.
 
 ## Distribution
 
@@ -533,8 +560,15 @@ needs his explicit go-ahead in chat, every time.**
 
 **Installation needs administrator rights** — the `Addins` folder is under Program
 Files and there is no per-user equivalent. The path is version-stamped
-(`memoQ-12`, `memoQ-13`, …), so a memoQ upgrade means a re-deploy. An installer that
-locates the current memoQ directory is a real requirement, not a nicety.
+(`memoQ-12`, `memoQ-13`, …), so a memoQ upgrade means a re-deploy. The installer
+therefore installs into EVERY `memoQ-NN` folder from 11 up (six slots, newest first,
+built with an ISPP `#for` over `[Files]`), and the Start Menu shortcut points to the
+newest. The uninstaller removes exactly what each slot placed. Tested 2026-09-29 with
+memoQ 11 and 12 side by side.
+
+`build.sh`'s own dev deploy still targets the newest memoQ only. To deploy into
+another version, stage the files and run `tools/deploy.ps1 -MemoQPath <folder>`
+elevated.
 
 ## Roadmap
 

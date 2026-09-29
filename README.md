@@ -9,7 +9,7 @@ Claude Desktop translate your live project.
 Companion to [Supervertaler for Trados](https://github.com/Supervertaler/Supervertaler-for-Trados),
 sharing its code through [Supervertaler-Plugin-Core](https://github.com/Supervertaler/Supervertaler-Plugin-Core).
 
-> **Status: released**, for memoQ 12, since 28 September 2026. The current version is on the
+> **Status: released**, for memoQ 11 and 12, since 28 September 2026. The current version is on the
 > [releases page](https://github.com/Supervertaler/Supervertaler-for-memoQ/releases/latest).
 > Download the installer from [supervertaler.com/download/memoq](https://supervertaler.com/download/memoq);
 > a 14-day trial starts by itself. The add-in is not yet signed by memoQ, so memoQ
