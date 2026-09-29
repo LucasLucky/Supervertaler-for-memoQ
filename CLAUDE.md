@@ -6,8 +6,9 @@ A memoQ add-in that brings Supervertaler's AI translation into memoQ. It is **no
 a port of Supervertaler for Trados — memoQ's plugin model is far narrower, and the
 feature set has to be re-shaped around it rather than carried across.
 
-Status: **released**. v0.1.0 was published on GitHub on 2026-09-28, for memoQ 12
-(untested on 11). It is unsigned; signing with memoQ has not started. How a
+Status: **released**, first as v0.1.0 on 2026-09-28, then v0.1.1 on 2026-09-29
+(opt-in usage ping and trial registration). For memoQ 12, untested on 11. The
+current version is in CHANGELOG.md and on GitHub's releases/latest. It is unsigned; signing with memoQ has not started. How a
 release is cut is under "Releasing" in the Distribution section.
 
 ## The constraint that shapes everything
