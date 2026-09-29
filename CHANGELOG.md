@@ -8,6 +8,11 @@ any release tooling that buckets on these headings works for both.
 
 ## [Unreleased]
 
+### Added
+
+- ★ **memoQ 11 is supported, as well as memoQ 12.** Translation and terminology both work in memoQ 11 – the AI's hits, TermLens, adding terms, the termbase editor. Supervertaler's termbases use a database library that memoQ 12 ships and memoQ 11 does not, so the installer now brings its own copy, and puts it only into a memoQ that lacks one: memoQ 12 keeps using its own. The files are the official open-source builds, the same ones memoQ 12 ships, checked by checksum when the installer is built.
+- **The installer installs into every memoQ on the computer**, from memoQ 11 up, not only the newest – translators often keep an older memoQ for clients who have not moved. Uninstalling removes Supervertaler from all of them, and only what it installed. The zip for installing by hand has a *for-memoQ-11* folder with the extra files, laid out as they go. memoQ 10 and older have not been tested and are left alone.
+
 ### Fixed
 
 - **Translation works in memoQ 11.** Every request failed there before reaching the AI, and memoQ showed nothing, because Supervertaler asked for a kind of context – forbidden terms – that memoQ added in version 12. It now uses that kind only where memoQ has it. memoQ 11 does not send forbidden terms, so nothing is lost; your own termbases' forbidden terms still reach the model.

@@ -84,25 +84,50 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; shortcut - when what actually has to happen next is switching the plugin on
 ; INSIDE memoQ. Installing alone does nothing visible, which is the classic way
 ; a new user concludes a plugin is broken.
-ReadyLabel2a=Supervertaler will be installed into memoQ's own add-ins folder.%n%nmemoQ must be closed. After installing you will need to switch Supervertaler on inside memoQ, which takes a minute and is explained at the end.
+ReadyLabel2a=Supervertaler will be installed into the add-ins folder of every memoQ on this computer, from memoQ 11 up.%n%nmemoQ must be closed. After installing you will need to switch Supervertaler on inside memoQ, which takes a minute and is explained at the end.
 FinishedLabel=Supervertaler is installed, but memoQ does not use it yet.%n%nStart memoQ, then:%n%n    1.  Options, Terminology plugins: tick "Perform terminology plugin lookups while working in the translation grid", find Supervertaler terms and tick Enable plugin.%n%n    2.  Options, Default resources, MT settings: tick Supervertaler and say Yes to all languages. Every new project then uses it. For a project you already have open, choose it under Project home, Settings, MT settings instead.%n%nThen restart memoQ once. The full instructions are at docs.supervertaler.com/memoq.
 
 [Files]
-; Into memoQ's Addins folder. {code:MemoQAddins} resolves at install time.
-Source: "{#SrcRoot}\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll";       DestDir: "{code:MemoQAddins}"; Flags: ignoreversion
-Source: "{#SrcRoot}\Supervertaler.MemoQ.Terms\bin\Release\Supervertaler.MemoQ.Terms.dll"; DestDir: "{code:MemoQAddins}"; Flags: ignoreversion
-Source: "{#SrcRoot}\Supervertaler.PromptEditor\bin\Release\Supervertaler.PromptEditor.exe"; DestDir: "{code:MemoQAddins}"; Flags: ignoreversion
+; Into the Addins folder of EVERY memoQ from 11 up that is on the computer, not
+; only the newest: translators keep an older memoQ for clients who still use it,
+; and memoQ 11 is fully supported (2026-09-29). Each memoQ found is a numbered
+; slot; a slot with no memoQ behind it installs nothing (Check: HasSlot). Inno
+; stores each source file once however many slots use it, and the uninstaller
+; removes exactly what each slot put down.
+#ifndef SqliteDir
+  #error SqliteDir is not defined - build with tools/build-installer.sh
+#endif
+#define Slots 6
+#define Slot 0
+#sub SlotFiles
+Source: "{#SrcRoot}\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll";               DestDir: "{code:SlotAddins|{#Slot}}"; Check: HasSlot({#Slot}); Flags: ignoreversion
+Source: "{#SrcRoot}\Supervertaler.MemoQ.Terms\bin\Release\Supervertaler.MemoQ.Terms.dll";   DestDir: "{code:SlotAddins|{#Slot}}"; Check: HasSlot({#Slot}); Flags: ignoreversion
+Source: "{#SrcRoot}\Supervertaler.PromptEditor\bin\Release\Supervertaler.PromptEditor.exe"; DestDir: "{code:SlotAddins|{#Slot}}"; Check: HasSlot({#Slot}); Flags: ignoreversion
+Source: "..\dist\Supervertaler-for-memoQ-MCP-Server.mcpb";                                 DestDir: "{code:SlotAddins|{#Slot}}"; Check: HasSlot({#Slot}); Flags: ignoreversion
+Source: "{#SqliteDir}\Microsoft.Data.Sqlite.dll";               DestDir: "{code:SlotAddins|{#Slot}}"; Check: SlotNeedsSqlite({#Slot}); Flags: ignoreversion
+Source: "{#SqliteDir}\SQLitePCLRaw.core.dll";                   DestDir: "{code:SlotAddins|{#Slot}}"; Check: SlotNeedsSqlite({#Slot}); Flags: ignoreversion
+Source: "{#SqliteDir}\SQLitePCLRaw.batteries_v2.dll";           DestDir: "{code:SlotAddins|{#Slot}}"; Check: SlotNeedsSqlite({#Slot}); Flags: ignoreversion
+Source: "{#SqliteDir}\SQLitePCLRaw.provider.dynamic_cdecl.dll"; DestDir: "{code:SlotAddins|{#Slot}}"; Check: SlotNeedsSqlite({#Slot}); Flags: ignoreversion
+Source: "{#SqliteDir}\e_sqlite3.dll"; DestDir: "{code:SlotAddins|{#Slot}}\runtimes\win-x64\native"; Check: SlotNeedsSqlite({#Slot}); Flags: ignoreversion
+#endsub
+#for {Slot = 0; Slot < Slots; Slot++} SlotFiles
 
-; The Claude Desktop extension, beside the editor because that is where the
-; editor looks for it - the Connect AI assistant dialog opens it for the user
-; rather than sending them to a download page. memoQ ignores it: it scans this
-; folder for assemblies carrying a Module attribute, and this is a zip.
+; What each slot carries, and why:
 ;
-; It is an order of magnitude larger than everything else here put together.
-; That is the trade accepted on purpose: Claude Desktop is the route most users
-; take, and an installer that carries it works with no network, no GitHub and no
-; release to point at.
-Source: "..\dist\Supervertaler-for-memoQ-MCP-Server.mcpb"; DestDir: "{code:MemoQAddins}"; Flags: ignoreversion
+; - The add-in, the terminology add-in and the editor.
+; - The Claude Desktop extension, beside the editor because that is where the
+;   editor looks for it - the Connect AI assistant dialog opens it for the user
+;   rather than sending them to a download page. memoQ ignores it: it scans this
+;   folder for assemblies carrying a Module attribute, and this is a zip. It is
+;   an order of magnitude larger than everything else put together, accepted on
+;   purpose: an installer that carries it works with no network.
+; - SQLite, ONLY for a memoQ that does not ship Microsoft.Data.Sqlite itself
+;   (memoQ 11; memoQ 12 has its own and is never given a second copy). Supervertaler's
+;   termbases need it. The four managed files sit in Addins, where memoQ's probing
+;   finds them. The native e_sqlite3.dll must NOT: memoQ loads every .dll in Addins
+;   as an assembly at start-up, and a native one fails with BadImageFormatException.
+;   SQLitePCLRaw looks for it under runtimes\win-x64\native beside itself, which
+;   memoQ's scan does not enter. Pinned by SHA-256 in build-installer.sh.
 
 ; The live document link, in our own folder.
 Source: "{#SrcRoot}\Supervertaler.MemoQ.Preview\bin\Release\Supervertaler.MemoQ.Preview.exe";        DestDir: "{app}"; Flags: ignoreversion
@@ -115,19 +140,29 @@ Source: "{#SrcRoot}\Supervertaler.MemoQ.Preview\bin\Release\Supervertaler.MemoQ.
 Name: "{autoprograms}\Supervertaler for memoQ"; Filename: "{code:MemoQAddins}\Supervertaler.PromptEditor.exe"
 
 [Code]
+const
+  { memoQ 11 is the oldest version tested (2026-09-29). Older ones are left
+    alone until someone has tried them: installing into a memoQ that cannot
+    load the add-in only buys an error at every start. }
+  OldestMemoQ = 11;
+  MaxSlots = 6;
+
 var
+  { Every memoQ found, newest first. MemoQDir is the newest, for the Start Menu
+    shortcut, which there is one of. }
+  MemoQDirs: array of String;
   MemoQDir: String;
 
-function FindMemoQ(): String;
+procedure FindAllMemoQ();
 var
-  Base, Best: String;
+  Base, Name: String;
   Rec: TFindRec;
-  Num, BestNum: Integer;
+  Nums: array of Integer;
+  Num, I, J, T: Integer;
+  S: String;
 begin
-  Result := '';
-  Best := '';
-  BestNum := -1;
-
+  SetArrayLength(MemoQDirs, 0);
+  SetArrayLength(Nums, 0);
   Base := ExpandConstant('{commonpf}') + '\memoQ';
   if not DirExists(Base) then Exit;
 
@@ -135,15 +170,18 @@ begin
   begin
     try
       repeat
+        Name := Rec.Name;
         if (Rec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
         begin
           { "memoQ-12" -> 12. A folder whose name carries no number comes
             back as -1 and is skipped rather than guessed at. }
-          Num := StrToIntDef(Copy(Rec.Name, 7, Length(Rec.Name)), -1);
-          if (Num > BestNum) and FileExists(Base + '\' + Rec.Name + '\memoQ.exe') then
+          Num := StrToIntDef(Copy(Name, 7, Length(Name)), -1);
+          if (Num >= OldestMemoQ) and FileExists(Base + '\' + Name + '\memoQ.exe') then
           begin
-            BestNum := Num;
-            Best := Base + '\' + Rec.Name;
+            SetArrayLength(MemoQDirs, GetArrayLength(MemoQDirs) + 1);
+            SetArrayLength(Nums, GetArrayLength(Nums) + 1);
+            MemoQDirs[GetArrayLength(MemoQDirs) - 1] := Base + '\' + Name;
+            Nums[GetArrayLength(Nums) - 1] := Num;
           end;
         end;
       until not FindNext(Rec);
@@ -152,7 +190,36 @@ begin
     end;
   end;
 
-  Result := Best;
+  { Newest first. A handful of entries, so a plain exchange sort. }
+  for I := 0 to GetArrayLength(Nums) - 2 do
+    for J := I + 1 to GetArrayLength(Nums) - 1 do
+      if Nums[J] > Nums[I] then
+      begin
+        T := Nums[I]; Nums[I] := Nums[J]; Nums[J] := T;
+        S := MemoQDirs[I]; MemoQDirs[I] := MemoQDirs[J]; MemoQDirs[J] := S;
+      end;
+
+  { More memoQs than slots: the newest ones get Supervertaler. }
+  if GetArrayLength(MemoQDirs) > MaxSlots then SetArrayLength(MemoQDirs, MaxSlots);
+
+  if GetArrayLength(MemoQDirs) > 0 then MemoQDir := MemoQDirs[0] else MemoQDir := '';
+end;
+
+function HasSlot(Slot: Integer): Boolean;
+begin
+  Result := Slot < GetArrayLength(MemoQDirs);
+end;
+
+function SlotAddins(Param: String): String;
+begin
+  Result := MemoQDirs[StrToInt(Param)] + '\Addins';
+end;
+
+{ Only a memoQ that does not ship Microsoft.Data.Sqlite gets our copy; one that
+  has it (memoQ 12) keeps using its own and is never given a second. }
+function SlotNeedsSqlite(Slot: Integer): Boolean;
+begin
+  Result := HasSlot(Slot) and not FileExists(MemoQDirs[Slot] + '\Microsoft.Data.Sqlite.dll');
 end;
 
 function MemoQAddins(Param: String): String;
@@ -179,13 +246,14 @@ function InitializeSetup(): Boolean;
 begin
   Result := False;
 
-  MemoQDir := FindMemoQ();
+  FindAllMemoQ();
   if MemoQDir = '' then
   begin
-    MsgBox('memoQ was not found on this computer.' + #13#10#13#10 +
+    MsgBox('memoQ 11 or later was not found on this computer.' + #13#10#13#10 +
            'Supervertaler for memoQ installs into memoQ''s own Addins folder, so memoQ has to be ' +
-           'installed first. If memoQ is installed somewhere unusual, install it in the normal ' +
-           'place or get in touch.', mbCriticalError, MB_OK);
+           'installed first. It works with memoQ 11 and 12; older versions have not been tested. ' +
+           'If memoQ is installed somewhere unusual, install it in the normal place or get in touch.',
+           mbCriticalError, MB_OK);
     Exit;
   end;
 

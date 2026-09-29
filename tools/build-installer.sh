@@ -53,6 +53,36 @@ echo "version: $VERSION"
 # source of truth for it and no bitmap to go stale when the icon changes.
 powershell.exe -NoProfile -File "$(cygpath -w "$ROOT/tools/make-wizard-images.ps1")"
 
+# --- SQLite, for memoQ versions that do not ship it ------------------------
+# Supervertaler's termbases use Microsoft.Data.Sqlite, which memoQ 12 ships and
+# memoQ 11 does not. The installer puts these five files into any memoQ that lacks
+# them (see the [Files] slots in the .iss). They come from the official NuGet
+# packages - the versions memoQ 12 itself ships, which Supervertaler compiles
+# against - and each is pinned by SHA-256, so a different file can never reach
+# a customer's memoQ: a changed package fails the build instead.
+SQLITE="/c/Temp/sv-sqlite-redist"
+rm -rf "$SQLITE"
+mkdir -p "$SQLITE"
+dotnet restore "$(cygpath -w "$ROOT/tools/sqlite-redist/fetch.csproj")" >/dev/null \
+    || { echo "ERROR: could not restore the SQLite packages" >&2; exit 1; }
+NUGET="${NUGET_PACKAGES:-$USERPROFILE/.nuget/packages}"
+NUGET="$(cygpath -u "$NUGET")"
+while read -r hash path; do
+    [[ -z "$hash" ]] && continue
+    file="$NUGET/$path"
+    [[ -f "$file" ]] || { echo "ERROR: missing from the NuGet cache: $path" >&2; exit 1; }
+    actual="$(sha256sum < "$file" | cut -d' ' -f1)"
+    [[ "$actual" == "$hash" ]] || { echo "ERROR: $path is not the pinned build ($actual)" >&2; exit 1; }
+    cp "$file" "$SQLITE/"
+done <<'PINS'
+1cee6065fe36e4475a39e62306d60d1b2e05085cc4698ebb67baf7677fc4968c microsoft.data.sqlite.core/9.0.3/lib/netstandard2.0/Microsoft.Data.Sqlite.dll
+dbcfd04e95aefa9ef0dcad4cd20009b018dd3d2943c8ccf3f40597b9ed9161b8 sqlitepclraw.core/2.1.10/lib/netstandard2.0/SQLitePCLRaw.core.dll
+564f2893b311819cfdbfb67bb7c32ccf0ddc018cb686531ba5fef5904186c2ef sqlitepclraw.bundle_e_sqlite3/2.1.10/lib/net461/SQLitePCLRaw.batteries_v2.dll
+a3b3935f2574b1b653780299b2019f6c38a16024e86bda2a951ba5340257b835 sqlitepclraw.provider.dynamic_cdecl/2.1.10/lib/netstandard2.0/SQLitePCLRaw.provider.dynamic_cdecl.dll
+39923cfdad272169c217406a60214ffe9bd6c1b3bd396a3eff94b781bd8d3376 sqlitepclraw.lib.e_sqlite3/2.1.10/runtimes/win-x64/native/e_sqlite3.dll
+PINS
+echo "sqlite: $(ls "$SQLITE" | wc -l) files, all pinned"
+
 # --- the installer ----------------------------------------------------------
 mkdir -p "$ROOT/dist"
 SETUP="$ROOT/dist/Supervertaler-for-memoQ-$VERSION.exe"
@@ -81,6 +111,7 @@ for attempt in 1 2 3; do
     mkdir -p "$OUT"
     MSYS2_ARG_CONV_EXCL="/D;/O" "$ISCC" \
         "/DAppVersion=$VERSION" \
+        "/DSqliteDir=$(cygpath -w "$SQLITE")" \
         "/O$(cygpath -w "$OUT")" \
         "$(cygpath -w "$ROOT/installer/Supervertaler-for-memoQ.iss")" \
         | grep -E "^Successful|error|Error" || true
@@ -115,6 +146,16 @@ mkdir -p "$STAGE"
 
 cp "$SETUP" "$STAGE/"
 cp "$PLUGIN" "$TERMS" "$EDITOR" "$STAGE/"
+
+# SQLite for a hand install into memoQ 11, laid out exactly as the installer
+# places it: the four managed files beside the add-in, the native one under
+# runtimes\win-x64\native (never loose in Addins - memoQ loads every .dll there
+# as an assembly and fails on a native one). memoQ 12 needs none of it.
+mkdir -p "$STAGE/for-memoQ-11/runtimes/win-x64/native"
+cp "$SQLITE/Microsoft.Data.Sqlite.dll" "$SQLITE/SQLitePCLRaw.core.dll" \
+   "$SQLITE/SQLitePCLRaw.batteries_v2.dll" "$SQLITE/SQLitePCLRaw.provider.dynamic_cdecl.dll" \
+   "$STAGE/for-memoQ-11/"
+cp "$SQLITE/e_sqlite3.dll" "$STAGE/for-memoQ-11/runtimes/win-x64/native/"
 
 ZIP="$ROOT/dist/Supervertaler-for-memoQ-$VERSION.zip"
 rm -f "$ZIP"
