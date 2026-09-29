@@ -8,6 +8,11 @@ any release tooling that buckets on these headings works for both.
 
 ## [Unreleased]
 
+### Added
+
+- **Anonymous usage statistics, if you agree.** The first time you open the Supervertaler editor, it asks whether Supervertaler for memoQ may send one small message each time memoQ starts: a random ID, the plugin version, the Windows and memoQ versions and your system language – never your documents, translations, terminology or file names. Nothing is sent unless you say yes, and you can change your answer under **Settings, Translation settings**. It lets the author see how many people use the memoQ plugin and on which versions of memoQ, as Supervertaler for Trados already does.
+- **The free trial is registered with the licence server**, as Supervertaler for Trados does, so a trial has one reliable start date. While there is no licence key, memoQ's start sends the anonymous machine identifier the licence already uses, the plugin and memoQ versions, your system language and the trial's start date and status. It is part of licensing rather than statistics, so it is not optional; it never slows memoQ down, and if it cannot connect the trial works exactly as before. A computer that has tried both plugins still has one trial.
+
 ### Fixed
 
 - **The memory bank tool no longer promises a filter it does not apply.** The Claude and ChatGPT tool that reads a memory bank said its query "biases retrieval" and took a subject-matter hint, but the bank is always read as a whole, whatever is passed. The descriptions now say so, and point to the search tool for finding a particular note; an empty bank is reported as having no content to load, rather than none "for this project, domain or language pair". Shared with Supervertaler for Trados.

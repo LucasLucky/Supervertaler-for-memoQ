@@ -72,6 +72,11 @@ namespace Supervertaler.MemoQ
             // Program Files (see LiveLink). Also in the background.
             System.Threading.Tasks.Task.Run(() => Core.LiveLink.StartOnce(PluginLog.Write));
 
+            // The opt-in usage ping and, while there is no licence key, the trial
+            // registration - once per memoQ session, in the background, silent on
+            // failure (see Stats).
+            Core.Stats.OnStart(PluginLog.Write);
+
             // Here rather than in the engine constructor: memoQ builds an engine
             // only for a project that uses the MT plugin, so a project whose
             // manager has switched MT plugins off never started the bridge - and

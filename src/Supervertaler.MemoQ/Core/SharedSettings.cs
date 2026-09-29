@@ -57,6 +57,9 @@ namespace Supervertaler.MemoQ.Core
         private const string ShowAllModelsKey = "showallmodels";
         private const string StructureContextKey = "structurecontext";
         private const string QuickTermHotkeyKey = "quicktermhotkey";
+        private const string UsageStatsKey = "usagestats";
+        private const string UsageStatsIdKey = "usagestats.id";
+        private const string UsageStatsAskedKey = "usagestats.asked";
         private const string PromptPathKey = "promptpath";
         private const string ApiKeyKey = "apikey";
         private const string SourceLangKey = "langsource";
@@ -274,6 +277,32 @@ namespace Supervertaler.MemoQ.Core
         /// possible to turn off without uninstalling it.
         /// </summary>
         public static bool QuickTermHotkey { get => BoolOr(QuickTermHotkeyKey, true); set => Write(QuickTermHotkeyKey, value ? "1" : "0"); }
+
+        /// <summary>
+        /// Anonymous usage statistics: one ping per memoQ session (see Stats).
+        /// Off unless the translator said yes - the editor asks once, and closing
+        /// the question counts as no - and switchable in Settings.
+        /// </summary>
+        public static bool UsageStats => BoolOr(UsageStatsKey, false);
+
+        /// <summary>The random id the ping carries. Empty until the translator says yes.</summary>
+        public static string UsageStatsId => StringOr(UsageStatsIdKey, string.Empty);
+
+        /// <summary>Whether the editor has asked the question, so it is asked once.</summary>
+        public static bool UsageStatsAsked => BoolOr(UsageStatsAskedKey, false);
+
+        /// <summary>
+        /// Records the answer, and mints the id on a first yes. Only the editor
+        /// calls this: one writer, so the plugin can never race it into a second
+        /// id for the same install. The plugin only reads.
+        /// </summary>
+        public static void SetUsageStats(bool on)
+        {
+            if (on && UsageStatsId.Length == 0)
+                Write(UsageStatsIdKey, Guid.NewGuid().ToString("D"));
+            Write(UsageStatsKey, on ? "1" : "0");
+            Write(UsageStatsAskedKey, "1");
+        }
 
 
         public static string PromptPath { get => Read(PromptPathKey); set => Write(PromptPathKey, value); }

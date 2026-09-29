@@ -747,10 +747,34 @@ namespace Supervertaler.PromptEditor
                 ScrollTreeHome();
 
                 ShowLicenceNotices();
+                AskUsageStatsOnce();
             };
 
             SetEditingEnabled(false);
             _status.Text = SupervertalerPaths.PromptLibraryDir;
+        }
+
+        // -- usage statistics ------------------------------------------------
+
+        /// <summary>
+        /// Asks once whether memoQ may send the anonymous usage ping (see
+        /// Stats in the plugin). A real yes or no - the dialog has no way to be
+        /// closed without an answer - and either can be changed in Settings.
+        /// </summary>
+        private void AskUsageStatsOnce()
+        {
+            if (SharedSettings.InHarness || SharedSettings.UsageStatsAsked) return;
+
+            var answer = MessageBox.Show(this,
+                "May Supervertaler for memoQ send anonymous usage statistics?\r\n\r\n" +
+                "If you agree, it sends one small message each time memoQ starts: a random ID, " +
+                "the plugin version, the Windows and memoQ versions and your system language. " +
+                "Never your documents, translations, terminology or file names.\r\n\r\n" +
+                "It shows me how many people use the memoQ plugin, and on which versions of memoQ. " +
+                "You can change your answer at any time under Settings, Translation settings. " +
+                "Details: supervertaler.com/privacy",
+                "Supervertaler for memoQ", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            SharedSettings.SetUsageStats(answer == DialogResult.Yes);
         }
 
         // -- licence -------------------------------------------------------

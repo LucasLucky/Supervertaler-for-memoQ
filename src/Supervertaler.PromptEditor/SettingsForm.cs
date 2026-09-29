@@ -36,6 +36,7 @@ namespace Supervertaler.PromptEditor
         private readonly CheckBox _useDocumentContext = new CheckBox();
         private readonly CheckBox _sendMemoryBank = new CheckBox();
         private readonly CheckBox _bridgeMode = new CheckBox();
+        private readonly CheckBox _usageStats = new CheckBox();
         private readonly TextBox _apiKey = new TextBox();
         private Label _apiKeySource;
 
@@ -247,6 +248,17 @@ namespace Supervertaler.PromptEditor
             y += 24;
             Hint("Pre-translate then only hands the segments to the chat and inserts the translations it "
                 + "sends back. Suggestions as you move through segments still use the API key.", fieldX, fieldW);
+            y += 14;
+
+            // Not about the model, but a standing choice like the ones above, and
+            // the place the first-start question says it can be changed.
+            _usageStats.Text = "Send anonymous usage statistics when memoQ starts";
+            _usageStats.Left = fieldX; _usageStats.Top = y; _usageStats.Width = fieldW;
+            _usageStats.AutoSize = true;
+            Controls.Add(_usageStats);
+            y += 24;
+            Hint("A random ID, the plugin, Windows and memoQ versions and your system language - "
+                + "never your documents or translations.", fieldX, fieldW);
             y += 14;
 
             // No memory bank here. It sits on the main window's context bar with
@@ -542,6 +554,7 @@ namespace Supervertaler.PromptEditor
             _useDocumentContext.Checked = SharedSettings.UseDocumentContextOr(true);
             _sendMemoryBank.Checked = SharedSettings.SendMemoryBank;
             _bridgeMode.Checked = SharedSettings.BridgeMode;
+            _usageStats.Checked = SharedSettings.UsageStats;
 
             // Null for the resource: this program cannot read memoQ's settings, and
             // does not need to, because memoQ copies that key into the shared file.
@@ -566,6 +579,10 @@ namespace Supervertaler.PromptEditor
             SharedSettings.SendMemoryBank = _sendMemoryBank.Checked;
             SharedSettings.BridgeMode = _bridgeMode.Checked;
             SharedSettings.ShowAllModels = _showAllModels.Checked;
+            // Only a change is recorded: saving other settings must not count as
+            // an answer to a question the translator has not been asked yet.
+            if (_usageStats.Checked != SharedSettings.UsageStats)
+                SharedSettings.SetUsageStats(_usageStats.Checked);
 
             // Into the shared key file, where Trados, memoQ and Sidekick all read
             // it. memoQ’s own apikey is cleared once the file has taken over, so
