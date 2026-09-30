@@ -187,7 +187,7 @@ namespace Supervertaler.PromptEditor
 
             // The version in the title bar, so "which version am I on" has an answer
             // at a glance - after an update, and when a customer asks for support.
-            Text = "Supervertaler for memoQ " + UpdateCheck.CurrentVersion();
+            Text = "Supervertaler for memoQ – v" + UpdateCheck.CurrentVersion();
             Width = 1180;
             Height = 760;
             StartPosition = FormStartPosition.CenterScreen;
