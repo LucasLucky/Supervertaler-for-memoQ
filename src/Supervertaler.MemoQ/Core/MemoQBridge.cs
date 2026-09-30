@@ -711,20 +711,24 @@ namespace Supervertaler.MemoQ.Core
                     continue;
                 }
 
-                p.Source = part.Source;
+                // The live link's text can carry trailing whitespace that memoQ's grid
+                // and translation request do not (an sdlxliff keeps the space between
+                // sentences at the end of the segment). The source is matched with
+                // that trimmed anyway; trimmed here too, so get_staged shows the
+                // source as the grid does.
+                p.Source = part.Source.TrimEnd();
                 resolved++;
             }
 
-            // Trailing whitespace is normalised to the source's BEFORE staging.
-            // memoQ appends the source's trailing whitespace to whatever a
-            // provider returns, so a target that already carries it arrives in the
-            // grid with it twice - which memoQ's own QA then flags.
+            // Trailing whitespace is removed from every target BEFORE staging.
+            // memoQ puts the source's own trailing whitespace back on whatever a
+            // provider returns, so a target must carry none (see StagedPairCheck).
             var pairs = req.Pairs
                 .Select(p => new KeyValuePair<string, string>(
-                    p.Source, StagedPairCheck.MatchTrailingWhitespace(p.Source, p.Target)))
+                    p.Source, StagedPairCheck.TrimTrailingWhitespace(p.Target)))
                 .ToList();
 
-            var respaced = req.Pairs.Count(p => StagedPairCheck.TrailingDiffers(p.Source, p.Target));
+            var respaced = req.Pairs.Count(p => StagedPairCheck.HasTrailingWhitespace(p.Target));
 
             // Tags compared before anything is stored. The QA checks already do
             // this, but only over a document Pre-translate has already written -
@@ -753,8 +757,8 @@ namespace Supervertaler.MemoQ.Core
                         + (unknownParts.Count == 0 ? "" : " WARNING: " + unknownParts.Count
                             + " pair(s) named a row id this plugin does not know (" + string.Join(", ", unknownParts.Take(3))
                             + "); their source text was used as given, so check it.")
-                        + (respaced == 0 ? "" : " " + respaced + " target(s) had their trailing whitespace matched to the source, "
-                            + "which memoQ would otherwise have doubled.")
+                        + (respaced == 0 ? "" : " " + respaced + " target(s) had trailing whitespace removed: memoQ adds "
+                            + "the source's own when it writes the row, so it is never needed in a staged target.")
                         + (tagProblems == null ? "" : " WARNING: " + tagProblems)
                         + (missing == null ? "" : " WARNING: " + missing)
             }));

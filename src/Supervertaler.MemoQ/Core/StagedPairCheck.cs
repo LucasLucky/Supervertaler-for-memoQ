@@ -74,43 +74,37 @@ namespace Supervertaler.MemoQ.Core
         }
 
         /// <summary>
-        /// <paramref name="target"/> with its trailing whitespace made to match the
-        /// source's.
+        /// <paramref name="target"/> without trailing whitespace.
         ///
-        /// <para>memoQ appends the source's trailing whitespace to whatever a
-        /// provider returns, so a target that already carries it ends up with it
-        /// twice - which memoQ's own QA then flags. Observed on a production job:
-        /// one source ended in a space, the staged target ended in a space, and the
-        /// grid came back with two.</para>
+        /// <para>memoQ hands a provider the source WITHOUT its trailing whitespace
+        /// and puts that whitespace back on whatever the provider returns. So a
+        /// staged target must carry none: memoQ supplies exactly what the source
+        /// has. Two production jobs showed both ways of getting it wrong. A target
+        /// ending in a space on a source ending in a space came back with two; and
+        /// matching the target to a source taken from the live document link -
+        /// where an sdlxliff import keeps the inter-sentence space at the end of
+        /// the segment, which memoQ's grid and request do not - put back a space
+        /// the source does not have, on about 78 rows of one job. Neither can
+        /// happen when the target simply has none.</para>
         ///
-        /// <para>Leading whitespace is left alone. It is far rarer, and unlike the
-        /// trailing case memoQ does not duplicate it.</para>
+        /// <para>Leading whitespace is left alone. It is far rarer, and memoQ does
+        /// not treat it this way.</para>
         /// </summary>
-        public static string MatchTrailingWhitespace(string source, string target)
+        public static string TrimTrailingWhitespace(string target)
         {
             if (target == null) return null;
-            if (string.IsNullOrEmpty(source)) return target;
 
             var trimmed = target.TrimEnd();
 
             // An all-whitespace target is not a translation; leave it untouched
-            // rather than turn it into the source's trailing run.
-            if (trimmed.Length == 0) return target;
-
-            return trimmed + Trailing(source);
+            // rather than turn it into an empty one.
+            return trimmed.Length == 0 ? target : trimmed;
         }
 
         /// <summary>Whether <paramref name="target"/> would change.</summary>
-        public static bool TrailingDiffers(string source, string target)
+        public static bool HasTrailingWhitespace(string target)
         {
-            return !string.Equals(target, MatchTrailingWhitespace(source, target), StringComparison.Ordinal);
-        }
-
-        private static string Trailing(string text)
-        {
-            var i = text.Length;
-            while (i > 0 && char.IsWhiteSpace(text[i - 1])) i--;
-            return text.Substring(i);
+            return !string.Equals(target, TrimTrailingWhitespace(target), StringComparison.Ordinal);
         }
 
         private static List<string> Names(string text)

@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Fixed
+
+- **A staged translation could end with a space the source does not have.** memoQ sends a translation provider the source without its trailing whitespace and puts that whitespace back on the result itself. Staging instead copied the source's trailing whitespace onto the target – and the source it looked at could be the live document link's, where a document imported from Trados (sdlxliff) keeps the space between sentences at the end of a segment that memoQ's grid does not show. On one job that put an extra space on about 78 rows; on a source that really does end in a space it would have doubled it. Staged targets now carry no trailing whitespace at all, and memoQ adds exactly what the source has. A source taken from a row id is shown without it too, as the grid shows it. Restage any rows staged before this fix.
+
 ## [0.1.3] – 2026-09-29
 
 ### Added

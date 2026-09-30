@@ -78,24 +78,26 @@ $sentence = $describe.Invoke($null, [object[]]@(, $two))
 Check ($sentence -like '*2 of them*') "the sentence counts them: $($sentence.Substring(0, [Math]::Min(40, $sentence.Length)))..."
 Check ($sentence -like '*draagarm*') "and names them"
 
-# ---- 4. trailing whitespace, which memoQ doubles ------------------------
-# memoQ appends the source's trailing whitespace to whatever a provider returns.
-# A staged target that already carries it arrives in the grid with it twice, and
-# memoQ's own QA then flags the row. Observed on a production job.
+# ---- 4. trailing whitespace: a staged target carries none ----------------
+# memoQ sends a provider the source without its trailing whitespace and puts it
+# back on the result. So a target must carry none, whatever the source looks
+# like: one ending in a space on a source ending in a space came back doubled,
+# and one matched to the live link's source - where an sdlxliff keeps the
+# inter-sentence space that memoQ's grid does not - got a space the source lacks.
 $pc = $asm.GetType('Supervertaler.MemoQ.Core.StagedPairCheck')
-$match = $pc.GetMethod('MatchTrailingWhitespace', $B)
-function Fix($s, $t) { return $match.Invoke($null, [object[]]@([string]$s, [string]$t)) }
+$trim = $pc.GetMethod('TrimTrailingWhitespace', $B)
+function Fix($t) { return $trim.Invoke($null, [object[]]@([string]$t)) }
 
-Check ((Fix 'Reinstall ' 'Opnieuw installeren ') -eq 'Opnieuw installeren ') "one trailing space in, one out"
-Check ((Fix 'Reinstall ' 'Opnieuw installeren') -eq 'Opnieuw installeren ') "a missing trailing space is added"
-Check ((Fix 'Reinstall' 'Opnieuw installeren ') -eq 'Opnieuw installeren') "an unwanted one is removed"
-Check ((Fix 'Reinstall' 'Opnieuw installeren') -eq 'Opnieuw installeren') "and a clean pair is untouched"
+Check ((Fix 'Opnieuw installeren ') -eq 'Opnieuw installeren') "a trailing space is removed - memoQ adds the source's own"
+Check ((Fix "Opnieuw installeren`t `r`n") -eq 'Opnieuw installeren') "so is any trailing run"
+Check ((Fix 'Opnieuw installeren') -eq 'Opnieuw installeren') "and a clean target is untouched, so none is ever ADDED"
+Check ((Fix '  Opnieuw installeren') -eq '  Opnieuw installeren') "leading whitespace is left alone"
 
-# A target that is nothing but whitespace is not a translation; turning it into
-# the source's trailing run would invent content.
-Check ((Fix 'Reinstall ' '   ') -eq '   ') "an all-whitespace target is left alone"
+# A target that is nothing but whitespace is not a translation; emptying it
+# would turn it into something else.
+Check ((Fix '   ') -eq '   ') "an all-whitespace target is left alone"
 # PowerShell turns $null into "" for a [string] parameter, so this goes through Invoke directly.
-Check ($null -eq $match.Invoke($null, [object[]]@([string]'Reinstall ', $null))) "and a null target stays null"
+Check ($null -eq $trim.Invoke($null, [object[]]@($null))) "and a null target stays null"
 
 # ---- 5. tag differences are reported, not refused -----------------------
 # A difference is not always an error - memoQ's markup varies by file filter -
