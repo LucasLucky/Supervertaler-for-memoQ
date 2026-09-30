@@ -185,7 +185,9 @@ namespace Supervertaler.PromptEditor
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
 
-            Text = "Supervertaler for memoQ";
+            // The version in the title bar, so "which version am I on" has an answer
+            // at a glance - after an update, and when a customer asks for support.
+            Text = "Supervertaler for memoQ " + UpdateCheck.CurrentVersion();
             Width = 1180;
             Height = 760;
             StartPosition = FormStartPosition.CenterScreen;

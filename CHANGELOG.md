@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Changed
+
+- **The editor's title bar shows the version you have** – "Supervertaler for memoQ 0.1.5" – so it is there at a glance after an update, and when you ask for help.
+
 ## [0.1.4] – 2026-09-30
 
 ### Fixed
