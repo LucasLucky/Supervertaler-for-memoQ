@@ -141,6 +141,18 @@ Check (@($allNames | Where-Object { $_ -eq 'Twin Name' }).Count -eq 0) "a shared
 Check (@($allNames | Where-Object { $_ -eq 'Twin Name (twin-name-a)' }).Count -eq 1) "the ambiguous one carries its id"
 Check (@($allNames | Where-Object { $_ -eq 'Claude Experimental 9' }).Count -eq 1) "an unambiguous one is left readable"
 
+# Models with no name at all are not "the same name". Ollama and OpenAI list
+# ids only, and counting those as all sharing the name "" labelled every one
+# " (id)" - a label that then went to the server as the model's name, and
+# Ollama answered "invalid model name" (0.1.12, found in memoQ on 2026-10-13).
+$openaiPath = $cacheFile.Invoke($null, [object[]]@($openai))
+[IO.File]::WriteAllLines($openaiPath, @("gpt-nameless-a", "gpt-nameless-b", "gpt-nameless-c"), (New-Object Text.UTF8Encoding($false)))
+$nameless = @($entries.Invoke($null, [object[]]@($openai, $true)) | Where-Object { $_.Id -like 'gpt-nameless-*' })
+Check ($nameless.Count -eq 3) "three models listed without names are all offered"
+Check (@($nameless | Where-Object { $_.ToString() -ne $_.Id }).Count -eq 0) `
+    "each shows its id and nothing else: $(($nameless | ForEach-Object { "'" + $_.ToString() + "'" }) -join ', ')"
+Remove-Item $openaiPath -ErrorAction SilentlyContinue
+
 # ---- 8. what the status line reports ------------------------------------
 Check ($extraCount.Invoke($null, [object[]]@($anthropic)) -eq 4) `
     "counted 4 beyond the short list: $($extraCount.Invoke($null, [object[]]@($anthropic)))"

@@ -107,16 +107,22 @@ namespace Supervertaler.MemoQ.Core
             // Several ids can share one display name - Google returns three models
             // called "Nano Banana Pro". Two identical rows in a dropdown is a coin
             // toss, so those get their id appended and the rest stay readable.
+            //
+            // Only models that HAVE a name. One without shows its id, which is
+            // unique already. Counting the nameless as sharing the name "" is what
+            // labelled every model Ollama and OpenAI list - neither sends names -
+            // " (qwen2.5:7b)", and that label, not the id, went to the server.
             var ambiguous = new HashSet<string>(
                 entries.Concat(extras)
-                    .GroupBy(e => e.DisplayName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .Where(e => !string.IsNullOrWhiteSpace(e.DisplayName))
+                    .GroupBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase)
                     .Where(g => g.Count() > 1)
                     .Select(g => g.Key),
                 StringComparer.OrdinalIgnoreCase);
 
             foreach (var e in extras)
             {
-                if (!ambiguous.Contains(e.DisplayName ?? string.Empty)) continue;
+                if (string.IsNullOrWhiteSpace(e.DisplayName) || !ambiguous.Contains(e.DisplayName)) continue;
                 if (string.Equals(e.DisplayName, e.Id, StringComparison.OrdinalIgnoreCase)) continue;
                 e.DisplayName = e.DisplayName + " (" + e.Id + ")";
             }

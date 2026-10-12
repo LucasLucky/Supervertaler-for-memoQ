@@ -413,6 +413,18 @@ foreach ($d in $dialogs) {
         Check ($hint.Text -like '*localhost:11434*') "$($d.Name): the hint says where Ollama is looked for"
         Check (@($model.Items | ForEach-Object { $_.Id }) -contains 'translategemma:12b') "$($d.Name): Ollama suggests models to download"
 
+        # A model from Fetch list, which Ollama names by id only, chosen and
+        # read back as the dialog would send it. 0.1.12 sent "(qwen2.5:7b)".
+        $cachePath = $catalog.GetMethod('CacheFile', $Static).Invoke($null, @('Ollama'))
+        [IO.File]::WriteAllLines($cachePath, @('qwen2.5:7b', 'mixtral:8x7b'), (New-Object Text.UTF8Encoding($false)))
+        (Field $form '_showAllModels').Checked = $true
+        $fetched = @($model.Items | Where-Object { $_.Id -eq 'qwen2.5:7b' })
+        Check ($fetched.Count -eq 1 -and $fetched[0].ToString() -eq 'qwen2.5:7b') "$($d.Name): a fetched model is shown as its id ('$($fetched[0])')"
+        $model.SelectedItem = $fetched[0]
+        $chosen = $form.GetType().GetMethod('ChosenModelId', $Instance).Invoke($form, @())
+        Check ($chosen -eq 'qwen2.5:7b') "$($d.Name): and choosing it sends '$chosen'"
+        (Field $form '_showAllModels').Checked = $false
+
         $parallel.Value = 3
         $provider.SelectedItem = 'OpenAI-compatible'
         Check ($endpoint.Enabled -and $key.Enabled) "$($d.Name): OpenAI-compatible opens the endpoint and the key box"

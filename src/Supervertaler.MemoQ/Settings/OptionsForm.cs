@@ -992,10 +992,13 @@ namespace Supervertaler.MemoQ.Settings
         {
             var typed = (_model.Text ?? string.Empty).Trim();
 
+            // Trimmed on both sides: the text is, so a label with a space at
+            // either end would otherwise never match, and its label would be
+            // sent as the model's name.
             foreach (var item in _model.Items)
             {
                 if (item is ModelCatalog.Entry entry
-                    && string.Equals(entry.ToString(), typed, StringComparison.Ordinal))
+                    && string.Equals(entry.ToString().Trim(), typed, StringComparison.Ordinal))
                     return entry.Id;
             }
 

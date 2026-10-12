@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Fixed
+
+- **A model chosen from the fetched list could not be used.** After *Fetch list*, the models Ollama lists – and OpenAI's, with *Show all models* ticked – were shown in brackets, such as *(qwen2.5:7b)*, and choosing one sent the brackets as part of its name, so every request failed with "invalid model name". They are now shown, and sent, as their plain names.
+
 ## [0.1.12] – 2026-10-12
 
 ### Added
