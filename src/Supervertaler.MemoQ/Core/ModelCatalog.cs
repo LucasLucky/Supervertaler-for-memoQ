@@ -26,7 +26,9 @@ namespace Supervertaler.MemoQ.Core
     /// serve: a model released after this build.
     ///
     /// Nothing here is the last word. The dropdown stays typeable, because a
-    /// gateway or a local model appears in neither list.
+    /// gateway or a local model appears in neither list. An OpenAI-compatible
+    /// server has no short list at all: what it serves is whatever its owner
+    /// loaded.
     /// </summary>
     internal static class ModelCatalog
     {
@@ -132,19 +134,27 @@ namespace Supervertaler.MemoQ.Core
 
         /// <summary>
         /// Asks the provider for its list and caches the answer. Returns null when
-        /// there is nothing to ask with or nobody to ask - no key, or a provider
-        /// with no list endpoint - so a caller can treat null as "keep what you
-        /// have". Throws on a failed request, with a message fit for a status line.
+        /// there is nothing to ask with or nobody to ask - no key for a provider
+        /// that needs one, or a provider with no list endpoint - so a caller can
+        /// treat null as "keep what you have". Throws on a failed request, with a
+        /// message fit for a status line.
+        ///
+        /// <para>For Ollama this is the list of models actually installed, which
+        /// is the one that matters there: the short list only suggests what is
+        /// worth downloading.</para>
         /// </summary>
         public static async Task<List<Entry>> FetchAsync(
             string provider, string apiKey, string endpoint, CancellationToken ct)
         {
             var key = LlmProviders.CoreKey(provider);
             if (key == null || !LlmModelCatalog.CanFetch(key)) return null;
-            if (string.IsNullOrWhiteSpace(apiKey)) return null;
+            if (LlmProviders.NeedsKey(provider) && string.IsNullOrWhiteSpace(apiKey)) return null;
+
+            // Core appends /api/tags to Ollama's address itself.
+            var address = key == LlmModels.ProviderOllama ? LlmProviders.OllamaAddress(endpoint) : endpoint;
 
             var fetched = await LlmModelCatalog
-                .FetchAsync(key, apiKey, endpoint, ct)
+                .FetchAsync(key, apiKey, address, ct)
                 .ConfigureAwait(false);
 
             var entries = (fetched ?? new List<LlmModelCatalog.FetchedModel>())

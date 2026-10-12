@@ -773,14 +773,13 @@ namespace Supervertaler.MemoQ.Core
             {
                 var general = General;
                 using (var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(90)))
-                using (var client = new global::Supervertaler.Core.LlmClient(
-                           SessionRunner.MapProviderForCore(general.Provider), general.Model, ApiKey,
-                           string.IsNullOrWhiteSpace(general.Endpoint) ? null : general.Endpoint.Trim()))
+                using (var client = LlmProviders.CreateClient(general.Provider, general.Model, ApiKey, general.Endpoint))
                 {
-                    var reply = client.SendPromptAsync(
-                            global::Supervertaler.Core.BankExtract.SelectionUserPrompt(request),
-                            global::Supervertaler.Core.BankExtract.SelectionSystemPrompt,
-                            cancellationToken: cancel.Token)
+                    var user = global::Supervertaler.Core.BankExtract.SelectionUserPrompt(request);
+                    var system = global::Supervertaler.Core.BankExtract.SelectionSystemPrompt;
+                    var reply = LocalServer.AskAsync(general, client,
+                            () => client.SendPromptAsync(user, system, cancellationToken: cancel.Token),
+                            user, system, cancel.Token)
                         .ConfigureAwait(false).GetAwaiter().GetResult();
 
                     var usage = client.LastUsage;

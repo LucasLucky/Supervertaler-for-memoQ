@@ -205,6 +205,12 @@ namespace Supervertaler.MemoQ.Core
                 {
                     throw;
                 }
+                catch (LocalServer.ContextTooSmallException ex)
+                {
+                    // Every row would be refused for the same reason, after a
+                    // request each to a server that may need a minute per answer.
+                    foreach (var i in chunk) results[i] = new TranslationResult { Exception = AsMemoQError(ex) };
+                }
                 catch (Exception ex)
                 {
                     PluginLog.Write($"Batch of {chunk.Count} failed; retrying them individually", ex);
@@ -385,22 +391,22 @@ namespace Supervertaler.MemoQ.Core
             }
             else
             {
-                // The first request of a run goes out alone (#5). Everything
-                // after it reads the cache that request wrote, rather than three
-                // more requests racing it and each paying write rate. One extra
-                // round trip at the start of a job, once.
-                var warming = await context.EnterWarmupAsync(cancellationToken).ConfigureAwait(false);
-
-                // Resolved fresh for this request, so this is the model that will
-                // actually be called - not the one the engine was built with.
-                PluginLog.ModelInUse(general.Provider, general.Model);
-
-                using (var client = new LlmClient(
-                           SessionRunner.MapProviderForCore(general.Provider),
-                           general.Model,
-                           apiKey,
-                           string.IsNullOrWhiteSpace(general.Endpoint) ? null : general.Endpoint.Trim()))
+                // Before the gate below, not inside it: this refuses an unknown
+                // provider or an address-less server by throwing, and a throw
+                // between taking the gate and the finally that opens it again
+                // would leave every other batch of the run waiting for good.
+                using (var client = LlmProviders.CreateClient(general.Provider, general.Model, apiKey, general.Endpoint))
                 {
+                    // The first request of a run goes out alone (#5). Everything
+                    // after it reads the cache that request wrote, rather than three
+                    // more requests racing it and each paying write rate. One extra
+                    // round trip at the start of a job, once.
+                    var warming = await context.EnterWarmupAsync(cancellationToken).ConfigureAwait(false);
+
+                    // Resolved fresh for this request, so this is the model that will
+                    // actually be called - not the one the engine was built with.
+                    PluginLog.ModelInUse(general.Provider, general.Model);
+
                     try
                     {
                     // Pre-translate sends one batch after another with the same
@@ -409,9 +415,11 @@ namespace Supervertaler.MemoQ.Core
                     // for it was the other half of the fix: the marker was never
                     // requested here, so even a stable system prompt paid full
                     // price every time.
-                    raw = await client.SendPromptAsync(userPrompt, system,
-                            cancellationToken: cancellationToken,
-                            enablePromptCaching: true)
+                    raw = await LocalServer.AskAsync(general, client,
+                            () => client.SendPromptAsync(userPrompt, system,
+                                cancellationToken: cancellationToken,
+                                enablePromptCaching: true),
+                            userPrompt, system, cancellationToken)
                         .ConfigureAwait(false);
 
                     // Read before the client is disposed. This is the only way

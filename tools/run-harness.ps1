@@ -52,6 +52,8 @@ try {
     # stops it resolving their real API key.
     $env:SUPERVERTALER_HARNESS = '1'
     & powershell -NoProfile -ExecutionPolicy Bypass -File $Harness
+    # Passed on, or a harness that reports FAIL still ends this script with 0.
+    $harnessExit = $LASTEXITCODE
 }
 finally {
     Remove-Item Env:SUPERVERTALER_HARNESS -ErrorAction SilentlyContinue
@@ -72,3 +74,5 @@ finally {
 
     Write-Host "[shared settings restored]"
 }
+
+exit $harnessExit

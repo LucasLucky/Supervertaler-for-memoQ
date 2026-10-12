@@ -29,6 +29,7 @@ namespace Supervertaler.PromptEditor
         private readonly Button _fetchModels = new Button();
         private readonly CheckBox _showAllModels = new CheckBox();
         private Label _modelStatus;
+        private Label _endpointHint;
         private readonly TextBox _endpoint = new TextBox();
         private readonly NumericUpDown _parallel = new NumericUpDown();
         private readonly NumericUpDown _batchSize = new NumericUpDown();
@@ -115,6 +116,14 @@ namespace Supervertaler.PromptEditor
                 RememberTypedKey();
                 _lastProvider = Provider;
                 _modelId = "";
+
+                // A server of the translator's own usually answers one request
+                // at a time, and anything sent beyond that waits there with its
+                // time limit running. Only on a switch: a value raised on purpose
+                // for a server that can take more is kept from then on.
+                if (LlmProviders.TakesEndpoint(Provider)) _parallel.Value = 1;
+
+                ShowForProvider();
                 ShowKeyFor(Provider);
                 ShowModels();
             };
@@ -178,12 +187,26 @@ namespace Supervertaler.PromptEditor
             Controls.Add(_modelStatus);
             y += 25;
 
-            Caption("Endpoint (optional)", y);
+            Caption("Endpoint", y);
             _endpoint.Left = fieldX; _endpoint.Top = y; _endpoint.Width = fieldW;
             Controls.Add(_endpoint);
             y += 26;
-            Hint("Leave blank for the provider default. Set this for a local model or a gateway.", fieldX, fieldW);
-            y += 10;
+
+            // Fixed and ellipsised, like the model status above, because it is
+            // rewritten whenever the provider changes - after the layout below
+            // it has been placed from its height.
+            _endpointHint = new Label
+            {
+                Left = fieldX,
+                Top = y,
+                Width = fieldW,
+                Height = 17,
+                AutoSize = false,
+                AutoEllipsis = true,
+                ForeColor = SystemColors.GrayText
+            };
+            Controls.Add(_endpointHint);
+            y += 17 + 10;
 
             Caption("Parallel requests", y);
             _parallel.Left = fieldX; _parallel.Top = y; _parallel.Width = 70;
@@ -345,7 +368,8 @@ namespace Supervertaler.PromptEditor
             var on = ModelCatalog.FetchedOn(provider);
 
             if (on == null)
-                _modelStatus.Text = "The models worth recommending. Fetch list asks the provider for the rest.";
+                _modelStatus.Text = ProviderText.ModelNote(provider)
+                    ?? "The models worth recommending. Fetch list asks the provider for the rest.";
             else if (extra == 0)
                 _modelStatus.Text = "Provider list fetched " + on + "; nothing in it beyond the short list.";
             else
@@ -411,7 +435,10 @@ namespace Supervertaler.PromptEditor
 
         private void Show(List<ModelCatalog.Entry> entries)
         {
-            if (entries == null || entries.Count == 0) return;
+            // An empty list is still a list: an OpenAI-compatible server has no
+            // short list, and returning early here left the previous provider's
+            // models on offer - Claude's, under a local server.
+            entries = entries ?? new List<ModelCatalog.Entry>();
 
             var typed = _modelId;
 
@@ -508,9 +535,25 @@ namespace Supervertaler.PromptEditor
             _apiKeySource.ForeColor = SystemColors.GrayText;
             _apiKeySource.Text = inherited.HasKey
                 ? "Key in use: " + inherited.Source
-                : "No API key is set for " + provider + ".";
+                : LlmProviders.NeedsKey(provider)
+                    ? "No API key is set for " + provider + "."
+                    : ProviderText.KeyNote(provider);
 
             ShowKeyShape();
+        }
+
+        /// <summary>
+        /// The fields that mean something only for some providers. The endpoint
+        /// is greyed out for Anthropic, OpenAI and Google because their requests
+        /// go to their own servers whatever it says - it used to be open for all
+        /// of them, with a hint promising a local model, and was ignored. The key
+        /// box is greyed out for Ollama, which is never sent one.
+        /// </summary>
+        private void ShowForProvider()
+        {
+            _endpoint.Enabled = LlmProviders.TakesEndpoint(Provider);
+            _endpointHint.Text = ProviderText.EndpointHint(Provider);
+            _apiKey.Enabled = !string.Equals(Provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -577,6 +620,7 @@ namespace Supervertaler.PromptEditor
             // Null for the resource: this program cannot read memoQ's settings, and
             // does not need to, because memoQ copies that key into the shared file.
             _lastProvider = provider;
+            ShowForProvider();
             ShowKeyFor(provider);
 
             _showAllModels.Checked = SharedSettings.ShowAllModels;

@@ -1064,7 +1064,7 @@ namespace Supervertaler.MemoQ.Core
             var general = context?.General;
             var apiKey = context?.ApiKey;
 
-            if (general == null || string.IsNullOrWhiteSpace(apiKey))
+            if (general == null || (Settings.LlmProviders.NeedsKey(general.Provider) && string.IsNullOrWhiteSpace(apiKey)))
             {
                 TryWrite(ctx, 409, Json(new ErrorBody
                 {
@@ -1091,18 +1091,17 @@ namespace Supervertaler.MemoQ.Core
             {
                 var plan = PlanAutoPrompt(req, doc, general, apiKey, mayClassify: true);
 
-                var provider = SessionRunner.MapProviderForCore(general.Provider);
-                var endpoint = string.IsNullOrWhiteSpace(general.Endpoint) ? null : general.Endpoint.Trim();
-
                 // Phase 2: the generation itself.
                 string raw;
                 string stopped;          // the provider's own word for why it stopped
                 bool ranOutOfRoom;
-                using (var client = new global::Supervertaler.Core.LlmClient(provider, general.Model, apiKey, endpoint))
+                using (var client = Settings.LlmProviders.CreateClient(general.Provider, general.Model, apiKey, general.Endpoint))
                 {
-                    raw = client.SendPromptAsync(
-                        global::Supervertaler.Core.PromptGenerator.BuildMetaPrompt(plan.Context),
-                        maxTokens: 32768).GetAwaiter().GetResult();
+                    var meta = global::Supervertaler.Core.PromptGenerator.BuildMetaPrompt(plan.Context);
+                    raw = LocalServer.AskAsync(general, client,
+                            () => client.SendPromptAsync(meta, maxTokens: 32768),
+                            meta, null, CancellationToken.None)
+                        .GetAwaiter().GetResult();
 
                     // Read before the using ends: these belong to the client.
                     stopped = client.LastFinishReason;
@@ -1301,9 +1300,6 @@ namespace Supervertaler.MemoQ.Core
                 }).ToList()
                 : new List<global::Supervertaler.Core.Models.TmMatch>();
 
-            var provider = SessionRunner.MapProviderForCore(general.Provider);
-            var endpoint = string.IsNullOrWhiteSpace(general.Endpoint) ? null : general.Endpoint.Trim();
-
             // Phase 1: domain and a one-line description. Normally the editor
             // has already run /v1/autoprompt/classify and the user confirmed
             // or changed the domain, which arrives in the request; only a
@@ -1316,7 +1312,7 @@ namespace Supervertaler.MemoQ.Core
             }
             else if (mayClassify)
             {
-                Classify(doc.Plain, analysis.PrimaryDomain, provider, general.Model, apiKey, endpoint,
+                Classify(doc.Plain, analysis.PrimaryDomain, general, apiKey,
                     out detectedDomain, out description);
             }
             else
@@ -1670,7 +1666,7 @@ namespace Supervertaler.MemoQ.Core
             var general = context?.General;
             var apiKey = context?.ApiKey;
 
-            if (general == null || string.IsNullOrWhiteSpace(apiKey))
+            if (general == null || (Settings.LlmProviders.NeedsKey(general.Provider) && string.IsNullOrWhiteSpace(apiKey)))
             {
                 TryWrite(ctx, 409, Json(new ErrorBody { Error = "No API key is configured in memoQ's Supervertaler settings." }));
                 return;
@@ -1691,9 +1687,7 @@ namespace Supervertaler.MemoQ.Core
             var sources = doc.Plain;
             var analysis = global::Supervertaler.Core.DocumentAnalyzer.Analyze(sources);
 
-            Classify(sources, analysis.PrimaryDomain,
-                SessionRunner.MapProviderForCore(general.Provider), general.Model, apiKey,
-                string.IsNullOrWhiteSpace(general.Endpoint) ? null : general.Endpoint.Trim(),
+            Classify(sources, analysis.PrimaryDomain, general, apiKey,
                 out var domain, out var description);
 
             // memoQ knows what kind of project this is. Prefer that over a guess
@@ -1728,7 +1722,7 @@ namespace Supervertaler.MemoQ.Core
         /// <summary>One short model call: domain plus a one-line description. Falls back to the keyword domain on any failure.</summary>
         private static void Classify(
             List<string> sources, string keywordDomain,
-            string provider, string model, string apiKey, string endpoint,
+            Settings.SupervertalerGeneralSettings general, string apiKey,
             out string domain, out string description)
         {
             domain = keywordDomain;
@@ -1739,12 +1733,14 @@ namespace Supervertaler.MemoQ.Core
                 if (string.IsNullOrEmpty(sample)) return;
 
                 string classified;
-                using (var client = new global::Supervertaler.Core.LlmClient(provider, model, apiKey, endpoint))
+                using (var client = Settings.LlmProviders.CreateClient(general.Provider, general.Model, apiKey, general.Endpoint))
                 {
-                    classified = client.SendPromptAsync(
-                        global::Supervertaler.Core.DocumentContextClassifier.BuildUserPrompt(sample),
-                        global::Supervertaler.Core.DocumentContextClassifier.SystemPrompt,
-                        maxTokens: 300, suppressLog: true).GetAwaiter().GetResult();
+                    var user = global::Supervertaler.Core.DocumentContextClassifier.BuildUserPrompt(sample);
+                    var system = global::Supervertaler.Core.DocumentContextClassifier.SystemPrompt;
+                    classified = LocalServer.AskAsync(general, client,
+                            () => client.SendPromptAsync(user, system, maxTokens: 300, suppressLog: true),
+                            user, system, CancellationToken.None)
+                        .GetAwaiter().GetResult();
                 }
 
                 global::Supervertaler.Core.DocumentContextClassifier.Parse(classified, out var aiDomain, out var aiDesc);

@@ -59,11 +59,23 @@ namespace Supervertaler.MemoQ.Core
             if (SharedSettings.InHarness)
                 return new Resolved { Key = string.Empty, Source = "suppressed for a test run" };
 
+            // Core sends Ollama no key at all, so there is nothing to look up.
+            if (string.Equals(provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase))
+                return new Resolved { Key = string.Empty, Source = "not needed for Ollama" };
+
             EnsureMigrated();
 
             var shared = ApiKeyStore.Get(LlmProviders.CoreKey(provider));
             if (!string.IsNullOrWhiteSpace(shared))
                 return new Resolved { Key = shared.Trim(), Source = "the shared key file" };
+
+            // A server of the translator's own gets its own key or none. The
+            // fallbacks below hold whichever cloud provider's key was in use
+            // before the shared file existed, and sending that to an address the
+            // translator typed would hand an Anthropic or OpenAI key to whoever
+            // runs it.
+            if (LlmProviders.TakesEndpoint(provider))
+                return new Resolved { Key = string.Empty, Source = "not set, which most local servers do not need" };
 
             return Fallback(provider, fromResource);
         }
@@ -97,6 +109,9 @@ namespace Supervertaler.MemoQ.Core
         public static bool Remember(string provider, string key)
         {
             if (SharedSettings.InHarness) return true;
+
+            // Nothing to keep: Ollama is never sent a key.
+            if (string.Equals(provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase)) return true;
 
             var core = LlmProviders.CoreKey(provider);
             if (core == null) return false;
@@ -144,10 +159,14 @@ namespace Supervertaler.MemoQ.Core
 
                 try
                 {
+                    // The cloud providers only. Trados keeps a key for its own
+                    // OpenAI-compatible endpoints, and copying it here would send
+                    // it to whatever server memoQ is pointed at, which need not be
+                    // the one it was issued for.
                     foreach (var provider in LlmProviders.All)
                     {
+                        if (!LlmProviders.NeedsKey(provider)) continue;
                         var core = LlmProviders.CoreKey(provider);
-                        if (core == null) continue;
                         if (!string.IsNullOrWhiteSpace(ApiKeyStore.Get(core))) continue;
 
                         var trados = FromTrados(provider);
@@ -155,9 +174,11 @@ namespace Supervertaler.MemoQ.Core
                     }
 
                     // memoQ's own two are provider-less: whatever they hold belongs
-                    // to the provider currently selected, and to no other.
+                    // to the provider currently selected, and to no other. They
+                    // predate the local providers, so a local provider being the
+                    // current one says nothing about whose key they are.
                     var current = SharedSettings.ProviderOr(LlmProviders.Anthropic);
-                    var currentCore = LlmProviders.CoreKey(current);
+                    var currentCore = LlmProviders.NeedsKey(current) ? LlmProviders.CoreKey(current) : null;
 
                     if (currentCore != null && string.IsNullOrWhiteSpace(ApiKeyStore.Get(currentCore)))
                     {

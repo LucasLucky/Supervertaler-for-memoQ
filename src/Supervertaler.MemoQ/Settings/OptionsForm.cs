@@ -35,6 +35,7 @@ namespace Supervertaler.MemoQ.Settings
         private readonly CheckBox _showAllModels = new CheckBox();
         private Label _modelNote;
         private Label _apiKeyNote;
+        private Label _endpointHint;
         private readonly TextBox _endpoint = new TextBox();
         private readonly TextBox _apiKey = new TextBox();
         private readonly ComboBox _promptPick = new ComboBox();
@@ -110,6 +111,14 @@ namespace Supervertaler.MemoQ.Settings
                 RememberTypedKey();
                 _lastProvider = CurrentProvider;
                 _modelId = "";
+
+                // A server of the translator's own usually answers one request
+                // at a time, and anything sent beyond that waits there with its
+                // time limit running. Only on a switch: a value raised on purpose
+                // for a server that can take more is kept from then on.
+                if (LlmProviders.TakesEndpoint(CurrentProvider)) _maxParallel.Value = 1;
+
+                ShowForProvider();
                 ShowKeyFor(CurrentProvider);
                 ShowModels();
             };
@@ -183,18 +192,20 @@ namespace Supervertaler.MemoQ.Settings
             Controls.Add(_apiKeyNote);
             y += 24;
 
-            Caption("Endpoint (optional)", y);
+            Caption("Endpoint", y);
             _endpoint.Left = fieldX; _endpoint.Top = y; _endpoint.Width = fieldW;
             Controls.Add(_endpoint);
             y += rowH - 6;
 
-            var endpointHint = new Label
+            // Rewritten for each provider, so fixed and ellipsised like the notes
+            // above rather than sized to whichever text it held first.
+            _endpointHint = new Label
             {
-                Text = "Leave blank for the provider default. Set this for a local model or a gateway.",
-                Left = fieldX, Top = y, AutoSize = true,
+                Left = fieldX, Top = y, Width = fieldW, Height = 17,
+                AutoSize = false, AutoEllipsis = true,
                 ForeColor = SystemColors.GrayText
             };
-            Controls.Add(endpointHint);
+            Controls.Add(_endpointHint);
             y += 26;
 
             Caption("Parallel requests", y);
@@ -449,6 +460,7 @@ namespace Supervertaler.MemoQ.Settings
             _loadedProvider = provider;
             _lastProvider = provider;
             _apiKey.Text = ApiKeys.Resolve(provider, s.ApiKey).Key;
+            ShowForProvider();
             // Normalise to CRLF for display. A multiline TextBox does not treat a
             // bare LF as a line break, and the stored prompt reliably has them:
             // XML normalises CRLF to LF on read, so however the settings were
@@ -500,7 +512,10 @@ namespace Supervertaler.MemoQ.Settings
                 },
                 new SupervertalerSecureSettings
                 {
-                    ApiKey = _apiKey.Text.Trim()
+                    // memoQ's copy stays the cloud key it was while a local
+                    // provider is chosen: it is the last fallback for that
+                    // provider, and the box now holds no key or a local one.
+                    ApiKey = LlmProviders.NeedsKey(CurrentProvider) ? _apiKey.Text.Trim() : _resourceApiKey
                 });
         }
 
@@ -826,11 +841,38 @@ namespace Supervertaler.MemoQ.Settings
             ShowKeyShape();
         }
 
-        /// <summary>Whether the key in the box looks like one for the chosen provider.</summary>
+        /// <summary>
+        /// Whether the key in the box looks like one for the chosen provider, or,
+        /// for a provider that can do without one, that it can.
+        /// </summary>
         private void ShowKeyShape()
         {
             if (_apiKeyNote == null) return;
-            _apiKeyNote.Text = ApiKeys.CheckShape(CurrentProvider, _apiKey.Text.Trim()) ?? string.Empty;
+
+            var wrong = ApiKeys.CheckShape(CurrentProvider, _apiKey.Text.Trim());
+            _apiKeyNote.ForeColor = wrong != null ? Color.Firebrick : SystemColors.GrayText;
+            _apiKeyNote.Text = wrong ?? ProviderText.KeyNote(CurrentProvider);
+        }
+
+        /// <summary>
+        /// The fields that mean something only for some providers. The endpoint
+        /// is greyed out for Anthropic, OpenAI and Google because their requests
+        /// go to their own servers whatever it says - it used to be open for all
+        /// of them, with a hint promising a local model, and was ignored. The key
+        /// box is greyed out for Ollama, which is never sent one.
+        /// </summary>
+        private void ShowForProvider()
+        {
+            var provider = CurrentProvider;
+
+            _endpoint.Enabled = LlmProviders.TakesEndpoint(provider);
+            _endpointHint.Text = ProviderText.EndpointHint(provider);
+
+            var ollama = string.Equals(provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase);
+            _apiKey.Enabled = !ollama;
+            if (ollama) _apiKey.Text = string.Empty;
+
+            ShowKeyShape();
         }
 
         /// <summary>
@@ -933,7 +975,8 @@ namespace Supervertaler.MemoQ.Settings
             var on = ModelCatalog.FetchedOn(provider);
 
             if (on == null)
-                _modelNote.Text = "The models worth recommending. Fetch list asks the provider for the rest.";
+                _modelNote.Text = ProviderText.ModelNote(provider)
+                    ?? "The models worth recommending. Fetch list asks the provider for the rest.";
             else if (extra == 0)
                 _modelNote.Text = "Provider list fetched " + on + "; nothing in it beyond the short list.";
             else
@@ -963,7 +1006,7 @@ namespace Supervertaler.MemoQ.Settings
         private string ApiKeyInUse()
         {
             var typed = _apiKey.Text.Trim();
-            return typed.Length > 0 ? typed : ApiKeys.Resolve(CurrentProvider, _resourceApiKey).Key;
+            return typed.Length > 0 ? typed : ApiKeys.Resolve(CurrentProvider, ResourceKeyFor(CurrentProvider)).Key;
         }
 
         /// <summary>
@@ -1065,38 +1108,52 @@ namespace Supervertaler.MemoQ.Settings
 
             try
             {
-                var settings = Collect();
-
-                // A real round trip, not a ping: translating one short segment
-                // exercises the key, the model name, the endpoint and the response
-                // shape together, which is what actually goes wrong.
-                var bundle = new TranslationBundle
+                // What is on screen, saved or not - which is what someone pressing
+                // this button is asking about. It used to go through an engine
+                // context, and a context lays the shared settings file over what
+                // it is given, so the test quietly tried the SAVED provider and
+                // model: choose another, press Test, and the old one answered
+                // "OK". With local models that would have meant a sentence sent
+                // to Anthropic by someone who had just chosen Ollama. It also
+                // recorded the test sentence as a captured segment.
+                var general = new SupervertalerGeneralSettings
                 {
-                    Source = SegmentBuilder.CreateFromString("The quick brown fox.")
+                    Provider = CurrentProvider,
+                    Model = ChosenModelId(),
+                    Endpoint = _endpoint.Text.Trim(),
+                    MaxParallelRequests = (int)_maxParallel.Value
                 };
 
-                // A throwaway context: no document, so DocumentMemory contributes
-                // nothing and the test exercises exactly the network path.
-                var context = new EngineContext(settings, "eng", "nld");
+                // A real round trip, not a ping: translating one short sentence
+                // exercises the key, the model name, the endpoint and the response
+                // shape together, which is what actually goes wrong.
+                const string ask = "Translate into Dutch. Reply with the translation only.\n\nThe quick brown fox.";
 
-                var result = await SessionRunner.TranslateAsync(
-                    bundle, context, CancellationToken.None).ConfigureAwait(true);
+                string text;
+                using (var client = LlmProviders.CreateClient(general.Provider, general.Model, ApiKeyInUse(), general.Endpoint))
+                {
+                    text = await LocalServer.AskAsync(general, client,
+                            () => client.SendPromptAsync(ask), ask, null, CancellationToken.None)
+                        .ConfigureAwait(true);
+                }
 
-                if (result.Exception != null) throw result.Exception;
+                text = (text ?? string.Empty).Trim();
+                if (text.Length == 0) throw new InvalidOperationException("The model answered with nothing.");
 
-                var text = result.Translation?.PlainText ?? string.Empty;
+                if (IsDisposed) return;
                 _status.ForeColor = Color.FromArgb(0, 120, 40);
                 _status.Text = "OK – " + (text.Length > 40 ? text.Substring(0, 40) + "…" : text);
             }
             catch (Exception ex)
             {
                 PluginLog.Write("Test connection failed", ex);
+                if (IsDisposed) return;
                 _status.ForeColor = Color.Firebrick;
                 _status.Text = ex.Message.Length > 140 ? ex.Message.Substring(0, 140) + "…" : ex.Message;
             }
             finally
             {
-                _test.Enabled = true;
+                if (!IsDisposed) _test.Enabled = true;
             }
         }
     }

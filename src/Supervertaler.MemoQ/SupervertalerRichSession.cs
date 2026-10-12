@@ -129,23 +129,6 @@ namespace Supervertaler.MemoQ
     internal static class SessionRunner
     {
         /// <summary>
-        /// Maps this plugin's provider names onto Supervertaler.Core's provider
-        /// constants. The two lists are deliberately separate: the settings value
-        /// is persisted in memoQ's MT settings resource and cannot be renamed
-        /// without breaking existing projects, whereas the Core constants are
-        /// shared with the Trados plugin.
-        /// </summary>
-        internal static string MapProviderForCore(string provider)
-        {
-            switch (provider)
-            {
-                case LlmProviders.OpenAI: return global::Supervertaler.Core.LlmModels.ProviderOpenAi;
-                case LlmProviders.Google: return global::Supervertaler.Core.LlmModels.ProviderGemini;
-                default: return global::Supervertaler.Core.LlmModels.ProviderClaude;
-            }
-        }
-
-        /// <summary>
         /// How many confirmed pairs to show the model. Enough to establish a
         /// register and the recurring terms of a document; small enough that a
         /// 2,000-segment pre-translate does not turn every request into an essay.
@@ -253,13 +236,9 @@ namespace Supervertaler.MemoQ
             // Supervertaler.Core's client, shared with the Trados plugin: the same
             // provider handling, model catalogue, pricing and usage accounting,
             // rather than the ~250-line stub this replaces.
-            using (var client = new global::Supervertaler.Core.LlmClient(
-                       MapProviderForCore(general.Provider),
-                       general.Model,
-                       apiKey,
-                       string.IsNullOrWhiteSpace(general.Endpoint) ? null : general.Endpoint.Trim()))
+            using (var client = LlmProviders.CreateClient(general.Provider, general.Model, apiKey, general.Endpoint))
             {
-                var reply = await AskAsync(client, prompt.User, prompt.System, structure, cancellationToken)
+                var reply = await AskAsync(general, client, prompt.User, prompt.System, structure, cancellationToken)
                     .ConfigureAwait(false);
 
                 // Checked before anything else happens to it (see ReplyCheck). A
@@ -273,7 +252,7 @@ namespace Supervertaler.MemoQ
                     PluginLog.Write($"reply: retried - {problem} ({reply?.Length ?? 0} chars back "
                         + $"for {taggedSource.Length})");
 
-                    var again = await AskAsync(client,
+                    var again = await AskAsync(general, client,
                             OutputContract.Reminder + Environment.NewLine + Environment.NewLine + prompt.User,
                             prompt.System, structure, cancellationToken)
                         .ConfigureAwait(false);
@@ -354,6 +333,7 @@ namespace Supervertaler.MemoQ
         /// answer is as clean as a fresh one.
         /// </summary>
         private static async Task<string> AskAsync(
+            SupervertalerGeneralSettings general,
             global::Supervertaler.Core.LlmClient client,
             string user,
             string system,
@@ -368,8 +348,10 @@ namespace Supervertaler.MemoQ
             // of the price. Without it a job with a 26,000-token memory bank paid
             // for about 41,000 input tokens on every row, and one morning of
             // ordinary work in memoQ cost several dollars on Opus.
-            var raw = await client.SendPromptAsync(user, system, cancellationToken: cancellationToken,
-                    enablePromptCaching: true)
+            var raw = await LocalServer.AskAsync(general, client,
+                    () => client.SendPromptAsync(user, system, cancellationToken: cancellationToken,
+                        enablePromptCaching: true),
+                    user, system, cancellationToken)
                 .ConfigureAwait(false);
 
             // Said on every request, as the batch path already does: the cache

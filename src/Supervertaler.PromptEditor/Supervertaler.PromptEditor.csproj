@@ -117,6 +117,9 @@
     <Compile Include="..\Supervertaler.MemoQ\Settings\LlmProviders.cs">
       <Link>Shared\LlmProviders.cs</Link>
     </Compile>
+    <Compile Include="..\Supervertaler.MemoQ\Settings\ProviderText.cs">
+      <Link>Shared\ProviderText.cs</Link>
+    </Compile>
     <Compile Include="..\Supervertaler.MemoQ\Core\ApiKeys.cs">
       <Link>Shared\ApiKeys.cs</Link>
     </Compile>

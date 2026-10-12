@@ -444,6 +444,53 @@ Both are off when `SUPERVERTALER_HARNESS` is set, which the wrapper and
 snapshots and restores both files as well. Check `shared.txt` after any run that
 skipped it.
 
+## Local models (Ollama, OpenAI-compatible), added 2026-10-12
+
+Two providers beside Anthropic, OpenAI and Google: `Ollama` and
+`OpenAI-compatible` (core's `ollama` and `custom_openai`). Core already spoke to
+both. memoQ never mapped to them, so the old "Endpoint (optional)" box was
+**ignored from 2026-08-30**, when the add-in switched to core's client: core reads
+`baseUrl` only for those two providers. The box is now greyed out for the cloud
+providers.
+
+- **`LlmProviders.CreateClient` is the only way a memoQ provider becomes a core
+  client.** It refuses an unknown provider, where the old mapper fell back to
+  Claude. It also refuses an OpenAI-compatible provider with no address, which
+  core would send to api.openai.com. Both refusals exist for confidentiality: a
+  translator who picked a local model picked it so the document stays in.
+- **Every model call inside memoQ goes through `LocalServer.AskAsync`.** For the
+  two local providers it does three things:
+  - queues requests in the plugin, sized by Parallel requests and read on every
+    call, so the time limit starts when a request is sent;
+  - turns core's time limit into a `TimeoutException`, not a cancellation, which
+    would otherwise send every row of a batch back for the full limit again;
+  - says "Is it running?" when nothing is listening.
+- **Ollama silently truncates a long prompt.** Measured 2026-10-12, Ollama
+  0.35.1, no GPU: the default context is 4,096 tokens (Ollama picks it from
+  VRAM). A 25,000-token prompt was cut to its first 5 and last ~2,046 tokens,
+  with HTTP 200, `done_reason` "stop" and a fluent translation. The only trace
+  was a WARN in Ollama's own log. `prompt_eval_count` reports the truncated
+  length, and still does when the prompt is served from Ollama's cache. So
+  `EnsureWholePromptRead` refuses any reply where the server read less than half
+  the estimated prompt, and `ContextTooSmallException` makes a batch skip the
+  row-by-row retry.
+- **Core does not send `num_ctx`.** That is why the add-in refuses rather than
+  fixes. Sending it is proposed to core's owner. When it lands, choose the size
+  from fixed steps: a change of `num_ctx` reloads the model (8 s measured).
+- **Speed on a CPU:** TranslateGemma 4B took 622 s to read 25,000 tokens the
+  first time and 6 s on every repeat. Hence the 30-minute `LocalTimeoutMinutes`
+  for Ollama. Core's OpenAI-compatible path still has its own 10 minutes.
+- **Keys.** Ollama is sent none. OpenAI-compatible reads only the shared file's
+  `custom_openai` slot, never the provider-less leftovers (`apikey`,
+  `apikey.memoq`): those hold a cloud key, and a typed address may belong to
+  anyone. Migration skips both local providers.
+- **Test connection tests what is in the dialog.** It used to build an
+  `EngineContext`, which lays `shared.txt` over the values it is given, so it
+  tested the saved provider instead.
+- `tools/local-models-test.ps1` covers all of the above. Its last section runs
+  against a real Ollama when one is listening (`SV_OLLAMA_MODEL`, default
+  `translategemma:4b`). LM Studio has not been tested; nothing here has it.
+
 ## Gotchas that have already bitten
 
 **memoQ will not load an assembly without `[assembly: Module(...)]`.** This is the

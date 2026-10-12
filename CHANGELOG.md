@@ -6,6 +6,18 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Added
+
+- ★ **Local models: Ollama and OpenAI-compatible servers.** Two new providers in the translation settings, in memoQ and in the editor. *Ollama* uses Ollama on your own computer, or on another one if you give its address; it needs no API key, and Fetch list shows the models you have installed. *OpenAI-compatible* covers LM Studio, llama.cpp, vLLM, Jan and company gateways: give its address (for LM Studio, `http://localhost:1234/v1`) and, only if the server asks for one, a key. With a model on your own computer, your documents do not leave it. Choosing either one sets *Parallel requests* to 1, because a server on one machine usually answers one request at a time; raise it if yours can take more.
+- **A translation made from part of the prompt is refused.** A local server reads only as much of a prompt as its *context length* allows. Ollama's is 4,096 tokens unless you raise it, and a longer prompt is cut without warning: the instructions, glossary and memory bank are dropped and the model translates the segment anyway. Supervertaler now checks how much of the prompt the server read, and when it is less than half, the translation is not used and memoQ shows, under the segment, how large to set the context length (*Settings › Context length* in Ollama).
+
+### Fixed
+
+- **The endpoint setting did nothing.** Since August it had been ignored for Anthropic, OpenAI and Google, which always use their own servers, while the hint beside it offered it for a local model or a gateway. It is now available only for Ollama and OpenAI-compatible, where it is used, and greyed out for the rest.
+- **Test connection tested the settings already saved, not the ones in the dialog.** Choosing a different provider or model and pressing Test connection tried the previous one, and reported success for it. It now tests what is in the dialog, saved or not.
+
 ## [0.1.11] – 2026-10-12
 
 ### Fixed

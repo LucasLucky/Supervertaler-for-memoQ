@@ -474,7 +474,7 @@ namespace Supervertaler.PromptEditor
             var model = (SharedSettings.ModelOr("") ?? "").Trim();
             if (model.Length == 0) { Say("No model is chosen. Pick one under Settings first."); return; }
             var key = ApiKeys.Resolve(provider, null);
-            if (!key.HasKey) { Say("No API key for " + provider + ". Enter one under Settings first."); return; }
+            if (LlmProviders.NeedsKey(provider) && !key.HasKey) { Say("No API key for " + provider + ". Enter one under Settings first."); return; }
             var endpoint = (SharedSettings.EndpointOr("") ?? "").Trim();
 
             var outPath = Path.Combine(bankDir, "figures.md");
@@ -517,8 +517,7 @@ namespace Supervertaler.PromptEditor
                     var documents = new List<FiguresFile.FigureDocument>();
                     var done = 0;
 
-                    using (var client = new LlmClient(LlmProviders.CoreKey(provider), model, key.Key,
-                                                      endpoint.Length == 0 ? null : endpoint))
+                    using (var client = LlmProviders.CreateClient(provider, model, key.Key, endpoint))
                     {
                         foreach (var doc in withImages)
                         {
