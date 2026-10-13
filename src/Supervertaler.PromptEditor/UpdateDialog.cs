@@ -20,7 +20,7 @@ namespace Supervertaler.PromptEditor
     {
         private readonly ReleaseInfo _release;
         private readonly Label _status;
-        private readonly Button _install, _notes, _skip, _later;
+        private readonly Button _install, _skip, _later;
 
         /// <summary>True once the installer has been started: the editor should close.</summary>
         internal bool InstallerStarted { get; private set; }
@@ -67,16 +67,30 @@ namespace Supervertaler.PromptEditor
             Paragraph("You have version " + current + ". To install it, close memoQ first; the installer "
                 + "asks for administrator rights once, as before, and keeps your settings, prompts, "
                 + "termbases, memory banks and licence.");
+
+            // A link in the text, not a button beside Install: what changed is
+            // what someone reads before deciding, and a button labelled "What's
+            // new" was easy to pass over (Michael, 2026-10-13).
+            var changes = new LinkLabel
+            {
+                Text = "See everything that has changed since version " + current,
+                AutoSize = true,
+                MaximumSize = new Size(inner, 0),
+                Location = new Point(margin, y)
+            };
+            changes.LinkClicked += (s, e) => Open(UpdateCheck.ChangelogUrl);
+            Controls.Add(changes);
+            y += changes.Height + 8;
+
             _status = Paragraph(string.Empty, colour: SystemColors.GrayText);
             y += 4;
 
             _install = AddButton("Download and install");
-            _notes = AddButton("What's new");
             _skip = AddButton("Skip this version");
             _later = AddButton("Later");
 
             var x = margin;
-            foreach (var b in new[] { _install, _notes, _skip, _later })
+            foreach (var b in new[] { _install, _skip, _later })
             {
                 b.Location = new Point(x, y);
                 x = b.Right + 8;
@@ -86,8 +100,11 @@ namespace Supervertaler.PromptEditor
             AcceptButton = _install;
             CancelButton = _later;
 
+            // Focus on Install, not on the link above it: a focused LinkLabel takes
+            // Enter for itself, and Enter has always meant install.
+            ActiveControl = _install;
+
             _install.Click += async (s, e) => await InstallAsync();
-            _notes.Click += (s, e) => Open(_release.NotesUrl);
             _skip.Click += (s, e) =>
             {
                 SharedSettings.UpdateSkipped = _release.Version;
@@ -106,7 +123,7 @@ namespace Supervertaler.PromptEditor
                 return;
             }
 
-            foreach (var b in new[] { _install, _notes, _skip, _later }) b.Enabled = false;
+            foreach (var b in new[] { _install, _skip, _later }) b.Enabled = false;
             _status.Text = "Downloading the installer…";
 
             var path = Path.Combine(Path.GetTempPath(), "Supervertaler-for-memoQ-Setup-" + _release.Version + ".exe");
@@ -115,7 +132,7 @@ namespace Supervertaler.PromptEditor
             if (problem != null)
             {
                 _status.Text = string.Empty;
-                foreach (var b in new[] { _install, _notes, _skip, _later }) b.Enabled = true;
+                foreach (var b in new[] { _install, _skip, _later }) b.Enabled = true;
                 MessageBox.Show(this,
                     "The update could not be installed: " + problem + ".\r\n\r\n"
                     + "You can download it yourself from supervertaler.com/download/memoq.",
@@ -133,7 +150,7 @@ namespace Supervertaler.PromptEditor
             {
                 // Declining the administrator prompt lands here too.
                 _status.Text = string.Empty;
-                foreach (var b in new[] { _install, _notes, _skip, _later }) b.Enabled = true;
+                foreach (var b in new[] { _install, _skip, _later }) b.Enabled = true;
                 MessageBox.Show(this, "The installer did not start: " + ex.Message, Text,
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }

@@ -14,7 +14,6 @@ namespace Supervertaler.MemoQ.Core
     {
         /// <summary>"0.1.2", from the tag "v0.1.2".</summary>
         [DataMember(Name = "version", Order = 0)] public string Version { get; set; }
-        [DataMember(Name = "notes_url", Order = 1)] public string NotesUrl { get; set; }
         [DataMember(Name = "setup_url", Order = 2)] public string SetupUrl { get; set; }
         [DataMember(Name = "setup_size", Order = 3)] public long SetupSize { get; set; }
         /// <summary>"sha256:…" when GitHub publishes one for the asset, else empty.</summary>
@@ -45,6 +44,14 @@ namespace Supervertaler.MemoQ.Core
 
         /// <summary>The installer's fixed name on every release (see tools/release.py).</summary>
         internal const string SetupName = "Supervertaler-for-memoQ-Setup.exe";
+
+        /// <summary>
+        /// Every version, newest first. The update dialog links here rather than
+        /// to the offered release's own page, which lists that release alone: a
+        /// translator three versions behind would never see the two in between.
+        /// </summary>
+        internal const string ChangelogUrl =
+            "https://github.com/Supervertaler/Supervertaler-for-memoQ/blob/main/CHANGELOG.md";
 
         private static readonly TimeSpan CacheFor = TimeSpan.FromHours(24);
         private static readonly TimeSpan RereadEvery = TimeSpan.FromMinutes(5);
@@ -151,7 +158,6 @@ namespace Supervertaler.MemoQ.Core
                 return new ReleaseInfo
                 {
                     Version = version,
-                    NotesUrl = release.HtmlUrl ?? string.Empty,
                     SetupUrl = asset.Url,
                     SetupSize = asset.Size,
                     SetupDigest = asset.Digest ?? string.Empty,
@@ -292,7 +298,6 @@ namespace Supervertaler.MemoQ.Core
         private sealed class GitHubRelease
         {
             [DataMember(Name = "tag_name")] public string TagName { get; set; }
-            [DataMember(Name = "html_url")] public string HtmlUrl { get; set; }
             [DataMember(Name = "draft")] public bool Draft { get; set; }
             [DataMember(Name = "prerelease")] public bool Prerelease { get; set; }
             [DataMember(Name = "assets")] public GitHubAsset[] Assets { get; set; }

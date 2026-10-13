@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Changed
+
+- **The update offer links to the whole changelog.** Its *What's new* button opened only the newest release's notes, so anyone skipping versions never saw what changed in between. The offer now says *See everything that has changed since version 0.1.12* (with your own version), and the link opens this changelog, newest first. Enter still means *Download and install*.
+
 ## [0.1.16] – 2026-10-13
 
 ### Added
