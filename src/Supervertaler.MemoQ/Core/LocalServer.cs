@@ -43,6 +43,10 @@ namespace Supervertaler.MemoQ.Core
         /// for an existing resource.</para>
         /// </summary>
         /// <param name="client">The client <paramref name="request"/> uses; its usage is read afterwards.</param>
+        /// <param name="request">
+        /// The call itself, given the token to send it with: the caller's own,
+        /// joined for a local server by the one <see cref="Stop"/> cancels.
+        /// </param>
         /// <param name="user">The user prompt sent, for judging how much of it was read.</param>
         /// <param name="system">The system prompt sent, likewise.</param>
         /// <param name="turn">
@@ -52,14 +56,17 @@ namespace Supervertaler.MemoQ.Core
         public static async Task<string> AskAsync(
             SupervertalerGeneralSettings general,
             LlmClient client,
-            Func<Task<string>> request,
+            Func<CancellationToken, Task<string>> request,
             string user,
             string system,
             CancellationToken cancellationToken,
             LocalQueue.Turn turn = null)
         {
             if (!LlmProviders.TakesEndpoint(general.Provider))
-                return await request().ConfigureAwait(false);
+                return await request(cancellationToken).ConfigureAwait(false);
+
+            // Just stopped: memoQ is still sending what it had lined up.
+            RefuseIfStopped();
 
             // The same segment already waiting or under way: its answer, not a
             // second model call. memoQ asks again for a segment it is waiting on.
@@ -102,7 +109,7 @@ namespace Supervertaler.MemoQ.Core
         private static async Task<string> AskQueuedAsync(
             SupervertalerGeneralSettings general,
             LlmClient client,
-            Func<Task<string>> request,
+            Func<CancellationToken, Task<string>> request,
             string user,
             string system,
             CancellationToken cancellationToken,
@@ -128,13 +135,26 @@ namespace Supervertaler.MemoQ.Core
                 var window = await ModelWindowAsync(general).ConfigureAwait(false);
                 RefuseIfTooLarge(general.Model, window, user, system);
 
+                // Taken last, as the request goes: Stop cancels what is under way
+                // at that moment, and a request taking its place just after Stop
+                // is refused here.
+                var stop = StopToken();
+
                 string reply;
                 var work = LocalProgress.Working(turn?.Label);
                 try
                 {
-                    reply = await request().ConfigureAwait(false);
+                    using (var both = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stop))
+                        reply = await request(both.Token).ConfigureAwait(false);
                     EnsureWholePromptRead(client.LastUsage, user, system, general.Model, window);
                     work.Answered(turn?.Interactive ?? true, asked);
+                }
+                catch (OperationCanceledException) when (stop.IsCancellationRequested)
+                {
+                    // Checked before the time limit below: a stopped request is
+                    // neither a timeout nor memoQ giving up, and either of those
+                    // would send a batch back one row at a time.
+                    throw new StoppedException();
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
@@ -184,6 +204,80 @@ namespace Supervertaler.MemoQ.Core
         }
 
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+
+        // -- Stop ----------------------------------------------------------------
+
+        /// <summary>
+        /// How long after Stop new requests are refused. memoQ goes on sending
+        /// what it had lined up - the rest of a Pre-translate, each row of a
+        /// batch, the rows it fetches ahead - and every one of them would start
+        /// the model again. Refused at once, they are over in a moment, and the
+        /// translator who lands on a segment after that gets a translation.
+        /// </summary>
+        private static readonly TimeSpan StopFor = TimeSpan.FromSeconds(15);
+
+        private static readonly object StopLock = new object();
+        private static CancellationTokenSource _stop = new CancellationTokenSource();
+        private static DateTime _stoppedUntil = DateTime.MinValue;
+
+        /// <summary>
+        /// The translator pressed Stop on the waiting notice: everything waiting
+        /// is refused, everything under way is cancelled - closing the connection,
+        /// which makes the server stop working on it - and anything new is
+        /// refused for <see cref="StopFor"/>.
+        ///
+        /// <para>The only way out there was. On 2026-10-13 one Pre-translate
+        /// batch to a local model ran for thirteen minutes, memoQ's own Cancel
+        /// waited for it, and ending Ollama's worker made the batch come back
+        /// row by row. Only quitting Ollama altogether ended it.</para>
+        /// </summary>
+        internal static void Stop()
+        {
+            CancellationTokenSource stopping;
+            lock (StopLock)
+            {
+                stopping = _stop;
+                _stop = new CancellationTokenSource();
+                _stoppedUntil = DateTime.UtcNow + StopFor;
+            }
+
+            var refused = LocalQueue.RefuseAll(() => new StoppedException());
+            PluginLog.Write($"local server: Stop pressed - {refused} waiting refused, any under way cancelled, "
+                + $"new ones refused for {StopFor.TotalSeconds:0} s");
+
+            // Last, and outside the lock: cancelling runs the requests' own
+            // callbacks, which must not find this half done.
+            stopping.Cancel();
+        }
+
+        private static void RefuseIfStopped()
+        {
+            lock (StopLock)
+            {
+                if (DateTime.UtcNow < _stoppedUntil) throw new StoppedException();
+            }
+        }
+
+        /// <summary>The token Stop cancels, or a refusal while just stopped.</summary>
+        private static CancellationToken StopToken()
+        {
+            lock (StopLock)
+            {
+                if (DateTime.UtcNow < _stoppedUntil) throw new StoppedException();
+                return _stop.Token;
+            }
+        }
+
+        /// <summary>
+        /// The translator stopped it. Not a fault, and never retried: a batch
+        /// stopped is not sent again one row at a time.
+        /// </summary>
+        internal sealed class StoppedException : InvalidOperationException
+        {
+            public StoppedException()
+                : base("Not translated: Stop was pressed on Supervertaler's waiting notice. "
+                    + "Go back to the segment, or run Pre-translate again, to have it translated.") { }
+        }
 
         // -- the model's own limit -----------------------------------------------
 

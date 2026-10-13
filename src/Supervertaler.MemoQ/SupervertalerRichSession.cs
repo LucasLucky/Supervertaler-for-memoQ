@@ -387,7 +387,7 @@ namespace Supervertaler.MemoQ
             // for about 41,000 input tokens on every row, and one morning of
             // ordinary work in memoQ cost several dollars on Opus.
             var raw = await LocalServer.AskAsync(general, client,
-                    () => client.SendPromptAsync(user, system, cancellationToken: cancellationToken,
+                    ct => client.SendPromptAsync(user, system, cancellationToken: ct,
                         enablePromptCaching: true),
                     user, system, cancellationToken, turn)
                 .ConfigureAwait(false);

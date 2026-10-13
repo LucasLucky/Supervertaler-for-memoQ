@@ -798,7 +798,7 @@ namespace Supervertaler.MemoQ.Core
                     var user = global::Supervertaler.Core.BankExtract.SelectionUserPrompt(request);
                     var system = global::Supervertaler.Core.BankExtract.SelectionSystemPrompt;
                     var reply = LocalServer.AskAsync(general, client,
-                            () => client.SendPromptAsync(user, system, cancellationToken: cancel.Token),
+                            ct => client.SendPromptAsync(user, system, cancellationToken: ct),
                             user, system, cancel.Token)
                         .ConfigureAwait(false).GetAwaiter().GetResult();
 

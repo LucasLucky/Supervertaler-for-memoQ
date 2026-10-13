@@ -595,6 +595,20 @@ message says "no setting raises it" instead of "raise the context length" when
 the model is the limit. With the shared memory bank Michael's prompt was
 16,446 tokens; without it, 927.
 
+**Stop** (`LocalServer.Stop`, the notice's link). Found 2026-10-13 with
+gemma4:26b-a4b: a Pre-translate batch ran 13 minutes, memoQ's Cancel waits for the
+request under way, `ollama stop` only unloads after it, and killing Ollama's
+worker made `BatchTranslator` retry the rows one by one, so Ollama reloaded the
+model. Only quitting Ollama ended it. Stop now: refuses everything waiting
+(`LocalQueue.RefuseAll`), cancels what is under way (every local request is sent
+with a token linked to a `CancellationTokenSource` that Stop cancels, so the
+connection closes and Ollama stops), and refuses new requests for 15 s, so memoQ's
+lined-up batches and the per-row fallback end at once. `StoppedException` is never
+retried, by `BatchTranslator` or as a timeout. Requests therefore take
+`Func<CancellationToken, Task<string>>`, not a closure over the caller's token.
+Untested live so far: whether Ollama really stops generating when the connection
+closes (expected, and what the log will show).
+
 **The notice names the segment** (`Turn.Label`, `LocalProgress.Working`) with
 its own clock, and says "translation ready ... click another segment and then
 back" when an interactive answer arrives more than 3 minutes after memoQ asked:

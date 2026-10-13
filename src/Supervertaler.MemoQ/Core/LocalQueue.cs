@@ -220,6 +220,26 @@ namespace Supervertaler.MemoQ.Core
         }
 
         /// <summary>
+        /// Refuses everything waiting, with the exception <paramref name="why"/>
+        /// makes for each. None of them holds a place, so none gives one back.
+        /// Returns how many there were.
+        /// </summary>
+        internal static int RefuseAll(Func<Exception> why)
+        {
+            List<Waiter> refused;
+            lock (Lock)
+            {
+                refused = new List<Waiter>(Waiting);
+                Waiting.Clear();
+            }
+
+            // Off the list first, so Leave cannot hand one of them a place; a
+            // cancellation arriving now finds it gone and does nothing.
+            foreach (var waiter in refused) waiter.Go.TrySetException(why());
+            return refused.Count;
+        }
+
+        /// <summary>
         /// Who goes next: a request someone is looking at before a Pre-translate
         /// batch, and within each the lowest stamp - the first asked, or the one
         /// moved to the front.

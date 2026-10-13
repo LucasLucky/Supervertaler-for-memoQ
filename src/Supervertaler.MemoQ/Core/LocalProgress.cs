@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Supervertaler.MemoQ.Settings;
 
@@ -34,7 +35,8 @@ namespace Supervertaler.MemoQ.Core
     /// window in front - a ten-minute wait should not float over other
     /// programs. It appears after <see cref="Delay"/>, so a quick answer
     /// never shows it, and closes when the last request is answered. A click
-    /// hides it until the next wait.</para>
+    /// hides it until the next wait; its Stop link ends the wait altogether
+    /// (<see cref="LocalServer.Stop"/>).</para>
     ///
     /// <para>It names the segment the model is on, with that segment's own
     /// clock: with memoQ fetching rows ahead, a clock that had run since the
@@ -412,6 +414,9 @@ namespace Supervertaler.MemoQ.Core
 
         private const string ReadyHint = "If memoQ isn't showing it, click another segment and then back.";
 
+        /// <summary>The notice's way out (<see cref="LocalServer.Stop"/>).</summary>
+        internal const string StopText = "Stop translating these segments";
+
         /// <summary>
         /// What the notice says. Separate from the window so it can be checked.
         /// </summary>
@@ -556,6 +561,7 @@ namespace Supervertaler.MemoQ.Core
             }
 
             private readonly Label _text;
+            private readonly LinkLabel _stop;
             private readonly System.Windows.Forms.Timer _tick;
 
             public NoticeForm(object token)
@@ -579,6 +585,27 @@ namespace Supervertaler.MemoQ.Core
                 _text.Click += (s, e) => { Dismiss(); Hide(); };
                 Click += (s, e) => { Dismiss(); Hide(); };
                 Controls.Add(_text);
+
+                // The way out when a wait is longer than anyone wants: memoQ's
+                // own Cancel waits for the request under way, however long.
+                _stop = new LinkLabel
+                {
+                    AutoSize = true,
+                    Text = StopText,
+                    Font = _text.Font,
+                    LinkColor = Color.FromArgb(140, 190, 255),
+                    ActiveLinkColor = Color.White,
+                    VisitedLinkColor = Color.FromArgb(140, 190, 255)
+                };
+                _stop.LinkClicked += (s, e) =>
+                {
+                    Dismiss();
+                    Hide();
+                    // On the pool: cancelling runs the requests' continuations,
+                    // which have no business on this window's thread.
+                    Task.Run(() => LocalServer.Stop());
+                };
+                Controls.Add(_stop);
 
                 _tick = new System.Windows.Forms.Timer { Interval = 1000 };
                 _tick.Tick += (s, e) => ShowState(Take(token));
@@ -605,8 +632,12 @@ namespace Supervertaler.MemoQ.Core
 
                 var reading = now.Waiting > 0 ? Parse(ReadLog(now.LogPath, now.LogFrom)) : null;
                 _text.Text = Describe(now.Provider, now.Model, now.Clock, now.Waiting, reading, now.Label, now.Ready);
-                ClientSize = new Size(_text.PreferredWidth + Padding.Horizontal,
-                    _text.PreferredHeight + Padding.Vertical);
+                // Stop only while something is waiting; "ready" alone has nothing to stop.
+                _stop.Visible = now.Waiting > 0;
+                _stop.Location = new Point(Padding.Left, _text.Top + _text.PreferredHeight + 8);
+                var height = _text.PreferredHeight + (_stop.Visible ? _stop.PreferredHeight + 8 : 0);
+                ClientSize = new Size(Math.Max(_text.PreferredWidth, _stop.Visible ? _stop.PreferredWidth : 0)
+                    + Padding.Horizontal, height + Padding.Vertical);
                 PlaceInMemoQCorner();
 
                 if (!Visible) Show();

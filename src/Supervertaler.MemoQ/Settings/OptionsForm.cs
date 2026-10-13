@@ -1203,7 +1203,7 @@ namespace Supervertaler.MemoQ.Settings
                 using (var client = LlmProviders.CreateClient(general.Provider, general.Model, ApiKeyInUse(), general.Endpoint))
                 {
                     text = await LocalServer.AskAsync(general, client,
-                            () => client.SendPromptAsync(ask), ask, null, CancellationToken.None)
+                            ct => client.SendPromptAsync(ask, cancellationToken: ct), ask, null, CancellationToken.None)
                         .ConfigureAwait(true);
                 }
 

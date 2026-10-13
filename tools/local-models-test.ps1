@@ -96,7 +96,64 @@ public static class LocalHarness
     static Task<string> Ask(object general, object client, Func<Task<string>> request,
                             string user, string system, CancellationToken ct, object turn = null)
     {
+        return AskWith(general, client, _ => request(), user, system, ct, turn);
+    }
+
+    /// The request is given the token it is sent with, as core's call is.
+    static Task<string> AskWith(object general, object client, Func<CancellationToken, Task<string>> request,
+                                string user, string system, CancellationToken ct, object turn = null)
+    {
         return (Task<string>)askAsync.Invoke(null, new object[] { general, client, request, user, system, ct, turn });
+    }
+
+    static string Outcome(Task<string> task, int milliseconds)
+    {
+        try { return task.Wait(milliseconds) ? task.Result : "still running"; }
+        catch (Exception e) { return Describe(e).Split(':')[0]; }
+    }
+
+    /// Stop with one request under way and one waiting, then one more asked
+    /// for straight after, then one more once the pause is over.
+    public static string StopEverything()
+    {
+        object g = General("Ollama", "m", 1, "http://localhost:1");
+        object client = Client("Ollama", "m", "http://localhost:1");
+        Type local = askAsync.DeclaringType;
+        var started = new TaskCompletionSource<bool>();
+        var sent = new List<string>();
+        object gate = new object();
+
+        Task<string> a = AskWith(g, client, async ct =>
+        {
+            lock (gate) sent.Add("A");
+            started.TrySetResult(true);
+            await Task.Delay(60000, ct);
+            return "reply A";
+        }, "stop A", "s", CancellationToken.None, Turn(true, false));
+        if (!started.Task.Wait(15000)) return "A never started";
+
+        Task<string> b = Ask(g, client, () => { lock (gate) sent.Add("B"); return Task.FromResult("reply B"); },
+            "stop B", "s", CancellationToken.None, Turn(true, false));
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        local.GetMethod("Stop", Any).Invoke(null, null);
+        string aOut = Outcome(a, 5000), bOut = Outcome(b, 5000);
+        long ms = clock.ElapsedMilliseconds;
+
+        Task<string> c = Ask(g, client, () => { lock (gate) sent.Add("C"); return Task.FromResult("reply C"); },
+            "stop C", "s", CancellationToken.None, Turn(true, false));
+        string cOut = Outcome(c, 5000);
+        string state = QueueState();
+
+        // The pause over: a request goes as usual.
+        local.GetField("_stoppedUntil", Any).SetValue(null, DateTime.MinValue);
+        Task<string> d = Ask(g, client, () => { lock (gate) sent.Add("D"); return Task.FromResult("reply D"); },
+            "stop D", "s", CancellationToken.None, Turn(true, false));
+        string dOut = Outcome(d, 15000);
+
+        lock (gate)
+            return "A: " + aOut + ", B: " + bOut + ", C: " + cOut + ", D: " + dOut
+                + " | sent " + string.Join(",", sent) + " | " + state + " | stopped in " + (ms < 3000 ? "under 3 s" : ms + " ms");
     }
 
     static Type turnType, queueType;
@@ -234,8 +291,10 @@ public static class LocalHarness
 
         try { Ask(g, client, fail, "u", "s", CancellationToken.None).Wait(); } catch { }
 
+        // Generous: each request first asks Ollama about the model, and with
+        // no Ollama running a refused connection takes Windows a second or two.
         Task<string> next = Ask(g, client, () => Task.FromResult("ok"), "u", "s", CancellationToken.None);
-        return next.Wait(3000) && next.Result == "ok";
+        return next.Wait(15000) && next.Result == "ok";
     }
 
     /// What reaches the caller when the request fails in a given way.
@@ -418,6 +477,16 @@ Check ($o -eq 'A,C | B: TaskCanceledException') "a request given up while it wai
 $s = [LocalHarness]::QueueState()
 Check ($s -eq 'waiting 0, running 0, flights 0') "and nothing is left behind in the queue ($s)"
 
+# ---- 4b. Stop ----------------------------------------------------------------------
+# The notice's way out. On 2026-10-13 a Pre-translate batch ran for thirteen
+# minutes, memoQ's Cancel waited for it, and only quitting Ollama ended it.
+Write-Host "-- Stop"
+$o = [LocalHarness]::StopEverything()
+Check ($o -like 'A: StoppedException, B: StoppedException, C: StoppedException, D: reply D |*') "Stop cancels the one under way, refuses the one waiting and the next one asked for, then lets the next go ($o)"
+Check ($o -like '*| sent A,D |*') "the refused ones never reached the server"
+Check ($o -like '*waiting 0, running 0, flights 0*') "and leaves nothing behind in the queue"
+Check ($o -like '*stopped in under 3 s') "at once, not when the request would have ended"
+
 # ---- 5. how a failure reaches memoQ -----------------------------------------
 Write-Host "-- failures"
 $o = [LocalHarness]::Outcome('Ollama', 'timeout')
@@ -598,6 +667,9 @@ Check ($null -eq $parse.Invoke($null, @('[GIN] 2026/10/13 - 10:47:52 | 200 | 13m
 $noticeT = $progress.GetNestedType('NoticeForm', [Reflection.BindingFlags]'NonPublic')
 $notice = [Activator]::CreateInstance($noticeT, [Reflection.BindingFlags]'Instance,Public,NonPublic', $null, @([object]::new()), $null)
 try {
+    $links = @($notice.Controls | Where-Object { $_ -is [Windows.Forms.LinkLabel] })
+    $stopText = $progress.GetField('StopText', $Static).GetValue($null)
+    Check ($links.Count -eq 1 -and $links[0].Text -eq $stopText) "the notice has a Stop link ('$stopText')"
     $ex = [LocalHarness]::ExStyle($notice.Handle)
     Check (($ex -band 0x8) -ne 0) "the notice window is always on top (style 0x$('{0:X}' -f $ex))"
     Check (($ex -band 0x08000000) -ne 0) "and never takes the keyboard from memoQ"

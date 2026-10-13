@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Added
+
+- **A Stop link on the waiting notice.** With a slow local model, one Pre-translate batch can keep memoQ busy for many minutes, and memoQ's own Cancel waits for it to finish. *Stop translating these segments* ends the wait at once: the translation under way is cancelled (Ollama stops working on it), everything still waiting is left untranslated, and what memoQ sends in the next few seconds is refused too, so a Pre-translate finishes quickly instead of starting the model again row by row. Segments left untranslated say why under the grid; go back to one, or run Pre-translate again, to have it translated.
+
 ## [0.1.15] – 2026-10-13
 
 ### Added

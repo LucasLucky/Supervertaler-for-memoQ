@@ -1099,7 +1099,7 @@ namespace Supervertaler.MemoQ.Core
                 {
                     var meta = global::Supervertaler.Core.PromptGenerator.BuildMetaPrompt(plan.Context);
                     raw = LocalServer.AskAsync(general, client,
-                            () => client.SendPromptAsync(meta, maxTokens: 32768),
+                            ct => client.SendPromptAsync(meta, maxTokens: 32768, cancellationToken: ct),
                             meta, null, CancellationToken.None)
                         .GetAwaiter().GetResult();
 
@@ -1738,7 +1738,7 @@ namespace Supervertaler.MemoQ.Core
                     var user = global::Supervertaler.Core.DocumentContextClassifier.BuildUserPrompt(sample);
                     var system = global::Supervertaler.Core.DocumentContextClassifier.SystemPrompt;
                     classified = LocalServer.AskAsync(general, client,
-                            () => client.SendPromptAsync(user, system, maxTokens: 300, suppressLog: true),
+                            ct => client.SendPromptAsync(user, system, maxTokens: 300, cancellationToken: ct, suppressLog: true),
                             user, system, CancellationToken.None)
                         .GetAwaiter().GetResult();
                 }

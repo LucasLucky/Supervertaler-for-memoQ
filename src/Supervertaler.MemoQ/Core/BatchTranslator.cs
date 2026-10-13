@@ -226,6 +226,12 @@ namespace Supervertaler.MemoQ.Core
                     // request each to a server that may need a minute per answer.
                     foreach (var i in chunk) results[i] = new TranslationResult { Exception = AsMemoQError(ex) };
                 }
+                catch (LocalServer.StoppedException ex)
+                {
+                    // The translator stopped it. Retried row by row, each row
+                    // would start the model again - exactly what Stop is for.
+                    foreach (var i in chunk) results[i] = new TranslationResult { Exception = AsMemoQError(ex) };
+                }
                 catch (Exception ex)
                 {
                     PluginLog.Write($"Batch of {chunk.Count} failed; retrying them individually", ex);
@@ -431,8 +437,8 @@ namespace Supervertaler.MemoQ.Core
                     // requested here, so even a stable system prompt paid full
                     // price every time.
                     raw = await LocalServer.AskAsync(general, client,
-                            () => client.SendPromptAsync(userPrompt, system,
-                                cancellationToken: cancellationToken,
+                            ct => client.SendPromptAsync(userPrompt, system,
+                                cancellationToken: ct,
                                 enablePromptCaching: true),
                             userPrompt, system, cancellationToken,
                             // In document order, behind any segment someone is looking at.
