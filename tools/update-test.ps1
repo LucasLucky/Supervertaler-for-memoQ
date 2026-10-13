@@ -47,7 +47,8 @@ $r = FromGitHub $real
 Check ($r -ne $null -and $r.Version -eq '0.1.1') "the version comes from the tag: $($r.Version)"
 Check ($r.SetupSize -eq 33108139 -and $r.SetupDigest -eq $digest) 'the installer is the fixed-name asset, with its size and digest'
 Check ($r.SetupUrl -like '*/v0.1.1/Supervertaler-for-memoQ-Setup.exe') 'and its own download address, not the zip'
-Check ($uc.GetField('ChangelogUrl', $Static).GetValue($null) -like 'https://github.com/Supervertaler/Supervertaler-for-memoQ/*/CHANGELOG.md') "the dialog's link opens the whole changelog, not one release's page"
+$since = Call 'ChangelogSince' @('0.1.12')
+Check ($since -eq 'https://supervertaler.com/changelog/memoq/?since=0.1.12') "the dialog's link shows what changed since the translator's own version ($since)"
 Check ($null -eq (FromGitHub ($real -replace '"draft":false', '"draft":true'))) 'a draft is never offered'
 Check ($null -eq (FromGitHub ($real -replace '"prerelease":false', '"prerelease":true'))) 'nor a pre-release'
 Check ($null -eq (FromGitHub ($real -replace 'Supervertaler-for-memoQ-Setup.exe"', 'Other.exe"'))) 'a release without the installer is not offered'

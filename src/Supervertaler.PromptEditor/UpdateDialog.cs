@@ -78,7 +78,7 @@ namespace Supervertaler.PromptEditor
                 MaximumSize = new Size(inner, 0),
                 Location = new Point(margin, y)
             };
-            changes.LinkClicked += (s, e) => Open(UpdateCheck.ChangelogUrl);
+            changes.LinkClicked += (s, e) => Open(UpdateCheck.ChangelogSince(current));
             Controls.Add(changes);
             y += changes.Height + 8;
 

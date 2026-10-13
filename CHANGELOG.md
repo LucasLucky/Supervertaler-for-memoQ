@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Changed
+
+- **The update offer's link shows only what changed since your version.** *See everything that has changed since version 0.1.12* now opens Supervertaler's own changelog page, [supervertaler.com/changelog/memoq](https://supervertaler.com/changelog/memoq/), showing just the releases after yours, newest first, with every release listed down the side.
+
 ## [0.1.17] – 2026-10-13
 
 ### Changed

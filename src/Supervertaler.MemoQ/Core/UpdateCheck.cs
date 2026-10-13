@@ -46,12 +46,15 @@ namespace Supervertaler.MemoQ.Core
         internal const string SetupName = "Supervertaler-for-memoQ-Setup.exe";
 
         /// <summary>
-        /// Every version, newest first. The update dialog links here rather than
-        /// to the offered release's own page, which lists that release alone: a
-        /// translator three versions behind would never see the two in between.
+        /// What has changed since <paramref name="version"/>: the website's page
+        /// for this changelog, showing only the releases after the translator's
+        /// own. Not the offered release's GitHub page, which lists that release
+        /// alone, so a translator three versions behind never saw the two in
+        /// between; and not CHANGELOG.md on GitHub, which shows everything. The
+        /// page reads CHANGELOG.md itself, so it is never behind it.
         /// </summary>
-        internal const string ChangelogUrl =
-            "https://github.com/Supervertaler/Supervertaler-for-memoQ/blob/main/CHANGELOG.md";
+        internal static string ChangelogSince(string version) =>
+            "https://supervertaler.com/changelog/memoq/?since=" + Uri.EscapeDataString((version ?? string.Empty).Trim());
 
         private static readonly TimeSpan CacheFor = TimeSpan.FromHours(24);
         private static readonly TimeSpan RereadEvery = TimeSpan.FromMinutes(5);
