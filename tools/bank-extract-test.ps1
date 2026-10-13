@@ -83,6 +83,9 @@ try {
         [Reflection.BindingFlags]'Instance,Public,NonPublic', $null, @($settings, 'eng', 'nld'), $null)
 
     $shared.GetProperty('MemoryBank', $Static).SetValue($null, 'acme')
+    # A cloud provider selects; a local server is sent the bank whole (4a). Set
+    # here, not inherited: the shared file is the user's own, and may say Ollama.
+    $shared.GetProperty('Provider', $Static).SetValue($null, 'Anthropic')
     $block = { $ctx.GetType().GetMethod('KbContextBlock').Invoke($ctx, @()) }
     $record = $store.GetMethod('Record', [Type[]]@($ctx.GetType(), [string]))
 
@@ -106,6 +109,21 @@ try {
     $record.Invoke($null, @($ctx, ('A later term appears further on in the document, with more text around it. ' * 3)))
     $grown = & $block
     Check ($grown -and $grown.Contains('| later term |')) 'once the captured text has grown, a term from the new part is sent too'
+
+    # ---- 4a. a local server: the whole bank, the same text every time -------
+    # Ollama keeps one prompt in its cache. memoQ runs two engines per language
+    # pair, each selecting from what it has seen of the document, and on
+    # 2026-10-13 their two selections alternated - a full re-read of a
+    # 13,000-token prompt at every switch. So a local server gets no selection.
+    $shared.GetProperty('Provider', $Static).SetValue($null, 'Ollama')
+    $local = & $block
+    Check ($local -and $local.Contains('BRIEF-MARKER') -and $local.Length -gt $extract.Length) "a local server is sent the bank whole: $($local.Length) characters, not the $($extract.Length) selected"
+    $record.Invoke($null, @($ctx, ('Yet more of the document arrives, and it grows well past the last doubling. ' * 12)))
+    Check ((& $block) -eq $local) 'and the same text however much of the document has been seen'
+    $other = [Activator]::CreateInstance($plugin.GetType('Supervertaler.MemoQ.Core.EngineContext'),
+        [Reflection.BindingFlags]'Instance,Public,NonPublic', $null, @($settings, 'eng', 'nld'), $null)
+    Check (($other.GetType().GetMethod('KbContextBlock').Invoke($other, @())) -eq $local) "and memoQ's second engine for the pair sends the same text"
+    $shared.GetProperty('Provider', $Static).SetValue($null, 'Anthropic')
 
     # ---- 5. a harness asks no model and writes no file -----------------------
     Check (-not (Test-Path (Join-Path $temp 'memoq\bank-extracts'))) 'no extract file is written under a harness'

@@ -16,6 +16,7 @@ any release tooling that buckets on these headings works for both.
 ### Changed
 
 - **Parallel requests is kept separately for cloud providers and for local servers.** Choosing Ollama or an OpenAI-compatible server used to set the one value to 1, and it stayed at 1 when you went back to Anthropic, OpenAI or Google. Each kind now keeps its own: local servers start at 1, the cloud providers keep theirs, and switching never changes either.
+- **With Ollama or an OpenAI-compatible server, the memory bank is sent the same way for every segment.** For a cloud provider, Supervertaler picks the part of the bank that fits the document, and that pick changes as memoQ shows it more of the document. A local server keeps only one copy of what it has read, and every change meant reading the whole bank again, which took 13 minutes on a computer without a graphics card. It now gets the whole bank, within the usual size limit, the same for every segment, so it reads it once.
 - **The language pair is repeated beside each segment.** The prompt names the languages at the top, and a memory bank can put thousands of words between that and the segment. Small local models then sometimes answered in the source language; one returned an English heading unchanged. Each request now says "Translate from English into Dutch" (or whatever the pair is) right before the text.
 
 ### Fixed

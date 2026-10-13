@@ -595,10 +595,25 @@ namespace Supervertaler.MemoQ.Core
             // rows, but the key moves only when it has doubled: every rebuild
             // changes the system prompt and costs a cache write, so a job gets a
             // handful of them rather than one per row.
-            var document = DocumentText(out var documentId, out var wholeDocument);
+            // A server of the translator's own gets the bank whole, the same text
+            // for every request, never a selection for the document. Ollama keeps
+            // ONE prompt in its cache, and a different bank text means reading the
+            // whole prompt again - 13 minutes on a computer without a graphics
+            // card. A selection changes with the document as memoQ shows more of
+            // it, and memoQ runs two engines per language pair that each make
+            // their own: on 2026-10-13 they sent 12,912 and 12,995 tokens of the
+            // same bank in turn, and every switch cost a full re-read. A cloud
+            // provider caches several prompts and keeps the selection, which
+            // costs it nothing. Whole also means no choice of articles, which is
+            // itself a slow model call on such a computer.
+            var local = LlmProviders.TakesEndpoint(General.Provider);
+            string document = null, documentId = null;
+            var wholeDocument = false;
+            if (!local) document = DocumentText(out documentId, out wholeDocument);
+
             var newest = NewestWrite(dir).ToString("O");
             var key = string.Join("|", dir, SourceLangCode, TargetLangCode, newest,
-                                  documentId, GrowthStep(document));
+                                  local ? "local" : documentId, local ? "whole" : GrowthStep(document));
 
             lock (_kbLock)
             {

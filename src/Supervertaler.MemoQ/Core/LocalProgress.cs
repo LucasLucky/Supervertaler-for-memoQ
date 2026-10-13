@@ -299,36 +299,39 @@ namespace Supervertaler.MemoQ.Core
             var text = new StringBuilder();
             text.Append("Supervertaler is waiting for ").Append(provider);
             if (!string.IsNullOrWhiteSpace(model)) text.Append(" (").Append(model.Trim()).Append(')');
-            text.Append(" · ").Append(Clock(elapsed));
+            text.Append(" \u00B7 ").Append(Clock(elapsed));
 
-            if (reading != null && reading.Total > 0)
+            // In a translator's words. The token counts follow in brackets: worth
+            // knowing - tokens are what models are priced and limited by - but
+            // not the thing the sentence is about (Michael, 2026-10-13).
+            var known = reading != null && reading.Total > 0;
+            var stillReading = false;
+
+            if (known)
             {
                 text.AppendLine();
                 var share = (int)Math.Floor(100.0 * Math.Min(reading.Done, reading.Total) / reading.Total);
+                var total = reading.Total.ToString("N0", CultureInfo.InvariantCulture);
 
-                if (reading.Writing)
-                {
-                    text.Append("Prompt read; now writing the translation.");
-                }
-                else if (reading.Total - reading.Done < ChunkTokens)
+                if (reading.Writing || reading.Total - reading.Done < ChunkTokens)
                 {
                     // Ollama reports every 1,024 tokens read and says nothing while
                     // it writes; its "prompt read" line comes only with the answer.
                     // Inside the last chunk, the percentage would sit still for the
                     // whole of the writing, looking stuck - so say what is next.
-                    text.Append("Prompt nearly read (").Append(share).Append("% of ")
-                        .Append(reading.Total.ToString("N0", CultureInfo.InvariantCulture))
-                        .Append(" tokens); the translation is written next.");
+                    text.Append("Instructions read (").Append(total).Append(" tokens); now writing the translation.");
                 }
                 else
                 {
-                    text.Append("Reading the prompt: ").Append(share).Append("% of ")
-                        .Append(reading.Total.ToString("N0", CultureInfo.InvariantCulture)).Append(" tokens");
+                    stillReading = true;
+                    text.Append("Reading the instructions: ").Append(share).Append("% done (")
+                        .Append(Math.Min(reading.Done, reading.Total).ToString("N0", CultureInfo.InvariantCulture))
+                        .Append(" of ").Append(total).Append(" tokens)");
 
                     if (reading.Rate > 0 && reading.Done > 0)
                     {
                         var left = TimeSpan.FromSeconds((reading.Total - reading.Done) / reading.Rate);
-                        text.Append(" · about ").Append(Roughly(left)).Append(" left");
+                        text.Append(" \u00B7 about ").Append(Roughly(left)).Append(" left");
                     }
                 }
             }
@@ -336,12 +339,19 @@ namespace Supervertaler.MemoQ.Core
             if (waiting > 1)
             {
                 text.AppendLine();
-                text.Append(waiting - 1).Append(waiting == 2 ? " more request is" : " more requests are").Append(" queued behind it.");
+                text.Append(waiting - 1).Append(waiting == 2
+                    ? " more translation is waiting its turn."
+                    : " more translations are waiting their turn.");
             }
 
-            text.AppendLine();
-            text.Append("The first segment is the slow one: the model reads Supervertaler's instructions once, "
-                + "then reuses them, so later segments are much quicker.");
+            // Why it is slow - only while it is, or when there is no telling.
+            if (stillReading || !known)
+            {
+                text.AppendLine();
+                text.Append("The first translation is the slow one: the model reads the instructions once and then "
+                    + "reuses them, so the next ones are much quicker.");
+            }
+
             return text.ToString();
         }
 

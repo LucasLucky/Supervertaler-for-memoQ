@@ -375,12 +375,16 @@ $reading = $parse.Invoke($null, @($log))
 Check ($reading.Total -eq 13903 -and $reading.Done -eq 10240 -and [math]::Abs($reading.Rate - 19.42) -lt 0.01 -and -not $reading.Writing) `
     "the log reads as 10,240 of 13,903 tokens at 19.42 a second"
 $text = $describe.Invoke($null, @('Ollama', 'qwen2.5:7b', [TimeSpan]::FromSeconds(527), 1, $reading))
-Check ($text -like '*waiting for Ollama (qwen2.5:7b)*8:47*' -and $text -like '*Reading the prompt: 73% of 13,903 tokens*about 4 minutes left*') "and the notice says so: $(($text -split "`n")[0..1] -join ' / ')"
-Check ($text -like "*The first segment is the slow one*") "and why"
+Check ($text -like '*waiting for Ollama (qwen2.5:7b)*8:47*' -and $text -like '*Reading the instructions: 73% done (10,240 of 13,903 tokens)*about 4 minutes left*') "and the notice says so: $(($text -split "`n")[0..1] -join ' / ')"
+Check ($text -like "*The first translation is the slow one*") "and why, in a translator's words"
+Check ($text -notmatch '\brequest') "with no 'request' in it"
 
 $done = $parse.Invoke($null, @($log + "`nslot print_timing: id  0 | task 9 | prompt eval time =  799400.48 ms / 13900 tokens (   57.51 ms per token,    17.39 tokens per second)"))
 Check ($done.Writing) "a finished prompt is read as writing the answer"
-Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(800), 3, $done)) -like '*now writing the translation*2 more requests are queued*') "which the notice says, with the queue behind it"
+$writing = $describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(800), 3, $done))
+Check ($writing -like '*Instructions read (13,903 tokens); now writing the translation.*2 more translations are waiting their turn.*') "which the notice says, with the queue behind it"
+Check ($writing -notlike '*slow one*') "and no longer explains a slowness that is over"
+Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(30), 2, $reading)) -like '*1 more translation is waiting its turn.*') "one waiting reads as one"
 
 # The second request of a job: most of the prompt is in Ollama's cache already.
 $warm = $parse.Invoke($null, @((@(
@@ -388,10 +392,11 @@ $warm = $parse.Invoke($null, @((@(
     'slot   operator(): id  0 | task 15 | cached n_tokens = 13312, memory_seq_rm [13312, end)'
 ) -join "`n")))
 Check ($warm.Done -eq 13312 -and $warm.Total -eq 13933) "tokens Ollama had cached count as read (13,312 of 13,933)"
-Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(9), 1, $warm)) -like '*Prompt nearly read (95% of 13,933 tokens); the translation is written next*') "so a warm request shows 95% and what comes next, not 0%"
+Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(9), 1, $warm)) -like '*Instructions read (13,933 tokens); now writing the translation.*') "so a warm request goes straight to writing, not 0%"
 
 $quiet = $describe.Invoke($null, @('OpenAI-compatible', 'local-model', [TimeSpan]::FromSeconds(75), 1, $null))
-Check ($quiet -like '*waiting for OpenAI-compatible (local-model)*1:15*' -and $quiet -notlike '*Reading the prompt*') "with no log to read, it says how long, and no more"
+Check ($quiet -like '*waiting for OpenAI-compatible (local-model)*1:15*' -and $quiet -notlike '*Reading the instructions*') "with no log to read, it says how long, and no more"
+Check ($quiet -like '*the model reads the instructions once*') "and names no server it cannot see"
 Check ($null -eq $parse.Invoke($null, @('[GIN] 2026/10/13 - 10:47:52 | 200 | 13m22s | POST "/api/chat"'))) "a log it cannot read gives no progress rather than a wrong one"
 
 # Always on top, by its own window style. WinForms' TopMost is applied on
