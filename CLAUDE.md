@@ -459,7 +459,7 @@ providers.
   core would send to api.openai.com. Both refusals exist for confidentiality: a
   translator who picked a local model picked it so the document stays in.
 - **Every model call inside memoQ goes through `LocalServer.AskAsync`.** For the
-  two local providers it does three things:
+  two local providers it shows the waiting notice (below) and does three things:
   - queues requests in the plugin, sized by Parallel requests and read on every
     call, so the time limit starts when a request is sent;
   - turns core's time limit into a `TimeoutException`, not a cancellation, which
@@ -489,7 +489,75 @@ providers.
   tested the saved provider instead.
 - `tools/local-models-test.ps1` covers all of the above. Its last section runs
   against a real Ollama when one is listening (`SV_OLLAMA_MODEL`, default
-  `translategemma:4b`). LM Studio has not been tested; nothing here has it.
+  `translategemma:4b`; set it to a missing name to skip, which you should
+  whenever Michael is using Ollama). LM Studio has not been tested; nothing here
+  has it.
+
+### First real use in memoQ (2026-10-13)
+
+Michael's PC: fast, 96 GB of RAM, no graphics card. Settings: qwen2.5:7b, a
+32k context, the default prompt plus a memory bank.
+- **Timing.** The first segment took **13 min 22 s**: 13,903 prompt tokens read
+  at 17 tokens a second, from Ollama's log. Later segments reused the cache: 12
+  to 54 s, mostly spent writing at about 1.2 tokens a second.
+- **memoQ asks again.** memoQ requested the same segment again after a few
+  minutes; the queue kept the two in order.
+- **The 7B model answered in English** on some segments, because the language pair
+  was 13,000 tokens back. So `PromptBuilder` now repeats it
+  (`LanguageReminder`) right before "Source segment:". The batch path cuts at
+  that label and keeps the line.
+- **It ended one reply with an empty `[[TC:]]`.** `BatchTranslator.WithoutEmptyComment`
+  removes an empty marker, using core's `ReplyCheck.WithoutComment`, and keeps
+  one with text.
+- **A connection that broke off mid-request** (Ollama restarting to update
+  itself) surfaced as "An error occurred while sending the request". It now gets
+  its own message in `LocalServer`.
+
+**The waiting notice** (`LocalProgress`). memoQ shows only a spinner, so the
+translator assumed it had hung.
+- A non-activating window in memoQ's corner, after 8 s, shown only while memoQ
+  is in front, closing when the last local request is answered.
+- **For Ollama on this computer it reads `%LocalAppData%\Ollama\server.log`.**
+  The lines are llama.cpp's, `task N | new prompt ... task.n_tokens = T`, then
+  `prompt processing, n_tokens = D, progress = P, t = S s / R tokens per
+  second` every 1,024 tokens, then `prompt eval time`. It shows the share
+  read and the time left. A format it does not recognise means elapsed time
+  only.
+- One notice for any number of requests. Each notice has its own token, so a
+  notice that is closing never clears the flag of a newer one.
+- **Topmost has to be in its CreateParams (`WS_EX_TOPMOST`).** WinForms applies
+  `Form.TopMost` on activation, and a window with `ShowWithoutActivation` is
+  never activated. So the first build's notice came up as an ordinary window,
+  and the first click into memoQ covered it: Windows reported it visible, and
+  nobody could see it. A check in `local-models-test.ps1` reads the real window
+  style. `Toast.cs` (the Alt+Up notice) has the same latent fault; it is on
+  screen for only 1.6 s.
+- **Cached tokens count as read.** The `cached n_tokens = N` line raises the
+  share read. In the last 1,024 tokens the notice says the translation is
+  written next, because Ollama logs nothing while it writes.
+
+**Keeping the model loaded did not work.** Ollama unloads a model 5 minutes
+after the last request, and the next segment then re-reads everything.
+- An empty `/api/generate` or `/api/chat` carrying `keep_alive` returns
+  `done_reason: "load"` but does NOT renew a model that is already loaded:
+  `/api/ps` showed the same `expires_at` after both.
+- The `keep_alive` must travel with core's own request. That is proposed to the
+  owner in the handoff.
+- Until then: the `OLLAMA_KEEP_ALIVE` environment variable, then restart Ollama.
+
+**Ollama's cloud.** A model named `*-cloud` or `*:cloud` runs on ollama.com.
+- `/api/tags` lists it with `remote_host: https://ollama.com` and
+  `remote_model`, at 306 bytes.
+- `/api/show` refuses it outright when Cloud is off in Ollama's settings ("ollama
+  cloud is disabled").
+- Allowed but announced: a red line in both dialogs and a description in the
+  list (both from the name), and "Ollama cloud" as the hit's label. The label
+  comes from `LocalServer.ProviderLabelAsync`, which asks `/api/tags` and so
+  catches a renamed cloud model too.
+
+**Parallel requests** is two values now: `parallel` for the cloud providers and
+`parallel.local` (default 1) for Ollama and OpenAI-compatible. The dialogs show
+whichever applies, and `EngineContext.General` picks it by provider.
 
 ## Gotchas that have already bitten
 

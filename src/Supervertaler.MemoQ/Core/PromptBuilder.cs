@@ -130,6 +130,16 @@ namespace Supervertaler.MemoQ.Core
 
             AppendFragmentRule(sb, bundle.Source);
 
+            // The language pair again, right beside the text. The prompt says it
+            // once, at the top, and a memory bank can put 13,000 tokens between
+            // that and the segment: on 2026-10-13 a 7B model through Ollama
+            // returned "Summary of the invention" unchanged, in English. A large
+            // model keeps track; this costs ten tokens and no cache, since it
+            // sits in the half that changes anyway. A batch keeps this line too -
+            // BuildForBatch cuts at "Source segment:" below - and its numbered
+            // segments follow it.
+            sb.AppendLine(LanguageReminder(sourceLangCode, targetLangCode));
+            sb.AppendLine();
             sb.AppendLine("Source segment:");
 
             // The marker rides in front of the text as a sentinel the model is
@@ -531,6 +541,10 @@ namespace Supervertaler.MemoQ.Core
         /// three-letter form, so map the ones that actually come up and fall back
         /// to the raw code — which a model still handles acceptably.
         /// </summary>
+        /// <summary>The line that restates the language pair beside the text to translate.</summary>
+        internal static string LanguageReminder(string sourceLangCode, string targetLangCode) =>
+            "Translate from " + DescribeLanguage(sourceLangCode) + " into " + DescribeLanguage(targetLangCode) + ".";
+
         internal static string DescribeLanguage(string langCode)
         {
             if (string.IsNullOrWhiteSpace(langCode)) return "the target language";

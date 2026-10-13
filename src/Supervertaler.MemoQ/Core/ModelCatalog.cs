@@ -122,6 +122,10 @@ namespace Supervertaler.MemoQ.Core
 
             foreach (var e in extras)
             {
+                // Said where it is chosen. Ollama lists its cloud models beside
+                // the local ones, and nothing else in the list tells them apart.
+                if (LlmProviders.IsOllamaCloudModel(provider, e.Id)) e.Description = ProviderText.CloudDescription;
+
                 if (string.IsNullOrWhiteSpace(e.DisplayName) || !ambiguous.Contains(e.DisplayName)) continue;
                 if (string.Equals(e.DisplayName, e.Id, StringComparison.OrdinalIgnoreCase)) continue;
                 e.DisplayName = e.DisplayName + " (" + e.Id + ")";

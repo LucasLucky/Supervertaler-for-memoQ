@@ -43,6 +43,19 @@ namespace Supervertaler.MemoQ.Settings
             return null;
         }
 
+        /// <summary>
+        /// In place of the model note, in red, while an Ollama cloud model is
+        /// chosen. It does not stop anything: the translator may want Ollama's
+        /// cloud, and only has to know that the text leaves the computer.
+        /// </summary>
+        public const string CloudWarning = "Cloud model: your text goes to Ollama's servers, not this computer.";
+
+        /// <summary>A cloud model's verdict in the dropdown, where it is chosen.</summary>
+        public const string CloudDescription = "runs on Ollama's servers - the text leaves this computer";
+
+        /// <summary>Beside Parallel requests.</summary>
+        public const string ParallelHint = "Cloud and local servers each keep their own.";
+
         private static bool Is(string provider, string name) =>
             string.Equals(provider, name, StringComparison.OrdinalIgnoreCase);
     }

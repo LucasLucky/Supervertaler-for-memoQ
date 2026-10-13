@@ -6,6 +6,23 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Added
+
+- **A progress notice while a local model works.** On a computer without a graphics card, the first segment of a document can take ten minutes or more with Ollama, while memoQ shows only a spinning circle. Supervertaler now shows a small notice in the corner of memoQ after a few seconds: how long it has been waiting and, for Ollama on this computer, how much of the prompt it has read and about how long is left. It explains that the first segment is the slow one – later ones reuse what was read and come back much faster – and closes itself when the translation arrives. Click it to hide it. It never takes the keyboard from memoQ, and shows only while memoQ is the window in front.
+- **Ollama's cloud models are named as such.** With *Cloud* switched on in Ollama's settings, a model whose name ends in *-cloud* runs on Ollama's servers, not on your computer. You can still use one, but you are told: in the model list, in red under the model in both settings dialogs, and on every segment, where the hit is labelled *Ollama cloud* instead of *Ollama*.
+
+### Changed
+
+- **Parallel requests is kept separately for cloud providers and for local servers.** Choosing Ollama or an OpenAI-compatible server used to set the one value to 1, and it stayed at 1 when you went back to Anthropic, OpenAI or Google. Each kind now keeps its own: local servers start at 1, the cloud providers keep theirs, and switching never changes either.
+- **The language pair is repeated beside each segment.** The prompt names the languages at the top, and a memory bank can put thousands of words between that and the segment. Small local models then sometimes answered in the source language; one returned an English heading unchanged. Each request now says "Translate from English into Dutch" (or whatever the pair is) right before the text.
+
+### Fixed
+
+- **An empty translator comment could end up in the target.** A model sometimes ends a translation with a translator-comment marker that holds nothing, *[[TC:]]*. That is now removed; a comment with text in it is kept, as before.
+- **A connection to a local server that broke off said only "An error occurred while sending the request".** It now says the connection to Ollama (or your server) broke off before it answered, which is what happens while it restarts after an update, and that trying the segment again will do.
+
 ## [0.1.13] – 2026-10-13
 
 ### Fixed

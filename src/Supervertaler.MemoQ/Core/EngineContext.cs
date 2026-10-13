@@ -155,16 +155,21 @@ namespace Supervertaler.MemoQ.Core
             get
             {
                 var stored = Settings.GeneralSettings ?? new SupervertalerGeneralSettings();
+                var provider = SharedSettings.ProviderOr(stored.Provider);
 
                 return new SupervertalerGeneralSettings
                 {
-                    Provider = SharedSettings.ProviderOr(stored.Provider),
+                    Provider = provider,
                     Model = SharedSettings.ModelOr(stored.Model),
                     Endpoint = SharedSettings.EndpointOr(stored.Endpoint),
                     PromptPath = SharedSettings.PromptPathOr(stored.PromptPath),
                     SystemPrompt = SharedSettings.InstructionsOr(stored.SystemPrompt),
                     BatchSize = SharedSettings.BatchSizeOr(stored.BatchSize),
-                    MaxParallelRequests = SharedSettings.ParallelOr(stored.MaxParallelRequests),
+                    // Each kind of provider keeps its own: a local server's one
+                    // request at a time must not become the cloud's value too.
+                    MaxParallelRequests = LlmProviders.TakesEndpoint(provider)
+                        ? SharedSettings.LocalParallel
+                        : SharedSettings.ParallelOr(stored.MaxParallelRequests),
                     UseTerminologyContext = SharedSettings.UseTerminologyContextOr(stored.UseTerminologyContext),
                     UseDocumentContext = SharedSettings.UseDocumentContextOr(stored.UseDocumentContext),
                     BridgeMode = SharedSettings.BridgeModeOr(stored.BridgeMode)

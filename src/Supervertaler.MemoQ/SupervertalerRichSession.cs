@@ -229,7 +229,7 @@ namespace Supervertaler.MemoQ
                 return new TranslationResult
                 {
                     Translation = TagBridge.FromTaggedText(cached, bundle.Source),
-                    Info = general.Provider + " / " + general.Model + Core.UpdateCheck.InfoSuffix()
+                    Info = await LocalServer.ProviderLabelAsync(general).ConfigureAwait(false) + " / " + general.Model + Core.UpdateCheck.InfoSuffix()
                 };
             }
 
@@ -323,7 +323,7 @@ namespace Supervertaler.MemoQ
 
                     // Info is free text shown under the hit in Translation results,
                     // and is the right place to say where the translation came from.
-                    Info = general.Provider + " / " + general.Model + Core.UpdateCheck.InfoSuffix()
+                    Info = await LocalServer.ProviderLabelAsync(general).ConfigureAwait(false) + " / " + general.Model + Core.UpdateCheck.InfoSuffix()
                 };
             }
         }
@@ -364,7 +364,7 @@ namespace Supervertaler.MemoQ
                     + (usage.CacheWriteTokens > 0 ? $" (cache write {usage.CacheWriteTokens:N0})" : "")
                     + $" out {usage.OutputTokens:N0}");
 
-            var reply = raw?.Trim();
+            var reply = BatchTranslator.WithoutEmptyComment(raw?.Trim());
 
             if (structure.Mode == StructureContextMode.Markers)
             {

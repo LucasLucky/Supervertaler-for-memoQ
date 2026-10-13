@@ -1,7 +1,11 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Supervertaler.Core;
@@ -51,6 +55,23 @@ namespace Supervertaler.MemoQ.Core
             if (!LlmProviders.TakesEndpoint(general.Provider))
                 return await request().ConfigureAwait(false);
 
+            // From the moment it starts waiting, queue included: the translator
+            // is waiting from then too. Disposed however the request ends.
+            using (LocalProgress.Begin(general))
+            {
+                return await AskQueuedAsync(general, client, request, user, system, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        private static async Task<string> AskQueuedAsync(
+            SupervertalerGeneralSettings general,
+            LlmClient client,
+            Func<Task<string>> request,
+            string user,
+            string system,
+            CancellationToken cancellationToken)
+        {
             var gate = Gate(general.MaxParallelRequests);
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
@@ -80,6 +101,18 @@ namespace Supervertaler.MemoQ.Core
                     throw new InvalidOperationException("Could not reach " + general.Provider + " at "
                         + Address(general) + ". Is it running?", ex);
                 }
+                catch (HttpRequestException ex) when (ex.InnerException != null)
+                {
+                    // Reached, then lost: the connection broke off before an
+                    // answer. Core's own errors for a server that answered badly
+                    // carry no inner exception and keep their message. Seen in
+                    // memoQ on 2026-10-13 while Ollama restarted to update itself,
+                    // as three rows saying only "An error occurred while sending
+                    // the request".
+                    throw new InvalidOperationException("The connection to " + general.Provider + " at "
+                        + Address(general) + " broke off before it answered (" + Innermost(ex).Message
+                        + "). If it was restarting - after an update, say - try the segment again.", ex);
+                }
 
                 EnsureWholePromptRead(client.LastUsage, user, system);
                 return reply;
@@ -93,12 +126,126 @@ namespace Supervertaler.MemoQ.Core
             }
         }
 
+        private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+
+        // -- Ollama's cloud ------------------------------------------------------
+
+        /// <summary>
+        /// What the hit's Info line names as its source: "Ollama cloud" for a
+        /// model that runs on Ollama's servers, otherwise the provider.
+        ///
+        /// <para>Asks Ollama's model list, which marks a cloud model with
+        /// remote_host whatever it is called - one local request, beside an
+        /// answer that took seconds at least. When the list cannot be read, or
+        /// does not list the model, the name decides (see
+        /// <see cref="LlmProviders.IsOllamaCloudModel"/>). Never refuses: cloud
+        /// models are allowed, and this is how the translator sees one is in
+        /// use, on every segment it translates.</para>
+        /// </summary>
+        public static async Task<string> ProviderLabelAsync(SupervertalerGeneralSettings general)
+        {
+            if (!string.Equals(general.Provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase))
+                return general.Provider;
+
+            string host = null;
+            var listed = false;
+            try
+            {
+                var json = await Http.GetStringAsync(LlmProviders.OllamaAddress(general.Endpoint) + "/api/tags")
+                    .ConfigureAwait(false);
+                host = RemoteHostIn(json, general.Model, out listed);
+            }
+            catch (Exception)
+            {
+                // The name decides instead.
+            }
+
+            var cloud = listed ? host != null : LlmProviders.IsOllamaCloudModel(general.Provider, general.Model);
+            if (!cloud) return general.Provider;
+
+            ReportCloud(general.Model, host ?? "Ollama's servers");
+            return CloudLabel;
+        }
+
+        internal const string CloudLabel = "Ollama cloud";
+
+        /// <summary>
+        /// The remote_host Ollama's model list gives this model, or null for one
+        /// that runs where Ollama does. <paramref name="listed"/> says whether the
+        /// list had the model at all. "qwen2.5" finds "qwen2.5:latest", as Ollama
+        /// itself resolves it.
+        /// </summary>
+        internal static string RemoteHostIn(string tagsJson, string model, out bool listed)
+        {
+            listed = false;
+            var wanted = (model ?? string.Empty).Trim();
+            if (wanted.Length == 0 || string.IsNullOrWhiteSpace(tagsJson)) return null;
+
+            TagList list;
+            using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(tagsJson)))
+                list = new DataContractJsonSerializer(typeof(TagList)).ReadObject(stream) as TagList;
+
+            foreach (var entry in list?.Models ?? new TagEntry[0])
+            {
+                if (entry == null) continue;
+                if (!Same(entry.Name, wanted) && !Same(entry.Model, wanted)) continue;
+
+                listed = true;
+                return string.IsNullOrWhiteSpace(entry.RemoteHost) ? null : entry.RemoteHost.Trim();
+            }
+
+            return null;
+        }
+
+        private static bool Same(string listedName, string wanted)
+        {
+            if (string.IsNullOrWhiteSpace(listedName)) return false;
+            if (string.Equals(listedName, wanted, StringComparison.OrdinalIgnoreCase)) return true;
+            return wanted.IndexOf(':') < 0
+                && string.Equals(listedName, wanted + ":latest", StringComparison.OrdinalIgnoreCase);
+        }
+
+#pragma warning disable 0649 // written by the deserialiser
+        [DataContract] private sealed class TagList { [DataMember(Name = "models")] public TagEntry[] Models; }
+
+        [DataContract]
+        private sealed class TagEntry
+        {
+            [DataMember(Name = "name")] public string Name;
+            [DataMember(Name = "model")] public string Model;
+            [DataMember(Name = "remote_host")] public string RemoteHost;
+        }
+#pragma warning restore 0649
+
+        private static readonly object CloudLock = new object();
+        private static string _cloudReported;
+
+        /// <summary>Says once, each time it changes, which cloud model is in use and where it runs.</summary>
+        private static void ReportCloud(string model, string host)
+        {
+            var key = (model ?? string.Empty).Trim() + " @ " + host;
+            lock (CloudLock)
+            {
+                if (string.Equals(_cloudReported, key, StringComparison.Ordinal)) return;
+                _cloudReported = key;
+            }
+
+            PluginLog.Write($"Ollama: {model} runs on {host}, not this computer - "
+                + "the text of each request is sent there");
+        }
+
         /// <summary>The address requests go to, for a message.</summary>
         private static string Address(SupervertalerGeneralSettings general)
         {
             return string.Equals(general.Provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase)
                 ? LlmProviders.OllamaAddress(general.Endpoint)
                 : (general.Endpoint ?? string.Empty).Trim();
+        }
+
+        private static Exception Innermost(Exception ex)
+        {
+            while (ex.InnerException != null) ex = ex.InnerException;
+            return ex;
         }
 
         /// <summary>Nothing answered at that address, as opposed to something answering badly.</summary>

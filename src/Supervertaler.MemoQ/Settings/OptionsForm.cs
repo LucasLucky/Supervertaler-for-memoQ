@@ -109,15 +109,11 @@ namespace Supervertaler.MemoQ.Settings
             {
                 if (_loading) return;
                 RememberTypedKey();
+                KeepParallel(_lastProvider);
                 _lastProvider = CurrentProvider;
                 _modelId = "";
 
-                // A server of the translator's own usually answers one request
-                // at a time, and anything sent beyond that waits there with its
-                // time limit running. Only on a switch: a value raised on purpose
-                // for a server that can take more is kept from then on.
-                if (LlmProviders.TakesEndpoint(CurrentProvider)) _maxParallel.Value = 1;
-
+                ShowParallel(CurrentProvider);
                 ShowForProvider();
                 ShowKeyFor(CurrentProvider);
                 ShowModels();
@@ -140,6 +136,9 @@ namespace Supervertaler.MemoQ.Settings
             {
                 if (_model.SelectedItem is ModelCatalog.Entry entry) _modelId = entry.Id;
             };
+
+            // Picked or typed, a cloud model is said to be one at once.
+            _model.TextChanged += (s, e) => { if (!_loading) ShowCloudWarning(); };
             Controls.Add(_model);
             y += rowH;
 
@@ -212,6 +211,13 @@ namespace Supervertaler.MemoQ.Settings
             _maxParallel.Left = fieldX; _maxParallel.Top = y; _maxParallel.Width = 70;
             _maxParallel.Minimum = 1; _maxParallel.Maximum = 16;
             Controls.Add(_maxParallel);
+
+            Controls.Add(new Label
+            {
+                Text = ProviderText.ParallelHint,
+                Left = fieldX + 82, Top = y + 3, AutoSize = true,
+                ForeColor = SystemColors.GrayText
+            });
             y += rowH;
 
             // Segments per request during Pre-translate. Matters beyond cost:
@@ -483,7 +489,9 @@ namespace Supervertaler.MemoQ.Settings
                 _status.ForeColor = Color.Firebrick;
                 _status.Text = "Selected prompt not in use: " + unavailable;
             }
-            _maxParallel.Value = Math.Max(1, Math.Min(16, SharedSettings.ParallelOr(g.MaxParallelRequests)));
+            _cloudParallel = Math.Max(1, Math.Min(16, SharedSettings.ParallelOr(g.MaxParallelRequests)));
+            _localParallel = Math.Max(1, Math.Min(16, SharedSettings.LocalParallel));
+            ShowParallel(CurrentProvider);
             _batchSize.Value = Math.Max(1, Math.Min(100, SharedSettings.BatchSizeOr(g.BatchSize)));
             _useTerminology.Checked = SharedSettings.UseTerminologyContextOr(g.UseTerminologyContext);
             _useDocumentContext.Checked = SharedSettings.UseDocumentContextOr(g.UseDocumentContext);
@@ -504,7 +512,10 @@ namespace Supervertaler.MemoQ.Settings
                     Endpoint = _endpoint.Text.Trim(),
                     PromptPath = SelectedPromptPath(),
                     SystemPrompt = _systemPrompt.ReadOnly ? _inlineInstructions : _systemPrompt.Text,
-                    MaxParallelRequests = (int)_maxParallel.Value,
+                    // The cloud value: memoQ's resource is the cloud providers'
+                    // fallback, and a local server's value lives in the shared
+                    // file alone.
+                    MaxParallelRequests = _cloudParallel,
                     UseTerminologyContext = _useTerminology.Checked,
                     UseDocumentContext = _useDocumentContext.Checked,
                     BridgeMode = _bridgeMode.Checked,
@@ -855,6 +866,49 @@ namespace Supervertaler.MemoQ.Settings
         }
 
         /// <summary>
+        /// Parallel requests for the cloud providers and for a server of the
+        /// translator's own, kept apart. One box shows whichever applies to the
+        /// provider chosen, so choosing Ollama shows Ollama's value and going
+        /// back to Anthropic shows Anthropic's again - nothing to remember to
+        /// undo, which the single value it replaced required.
+        /// </summary>
+        private int _cloudParallel = 4;
+        private int _localParallel = 1;
+
+        /// <summary>Parks the box's value with the kind of provider it was showing.</summary>
+        private void KeepParallel(string provider)
+        {
+            if (string.IsNullOrEmpty(provider)) return;
+            if (LlmProviders.TakesEndpoint(provider)) _localParallel = (int)_maxParallel.Value;
+            else _cloudParallel = (int)_maxParallel.Value;
+        }
+
+        private void ShowParallel(string provider)
+        {
+            _maxParallel.Value = LlmProviders.TakesEndpoint(provider) ? _localParallel : _cloudParallel;
+        }
+
+        /// <summary>
+        /// Puts the cloud warning in the model note while an Ollama cloud model is
+        /// chosen, and returns whether it did. Otherwise leaves the note to say
+        /// what it was saying, unless that was the warning itself.
+        /// </summary>
+        private bool ShowCloudWarning()
+        {
+            if (_modelNote == null) return false;
+
+            if (LlmProviders.IsOllamaCloudModel(CurrentProvider, ChosenModelId()))
+            {
+                _modelNote.ForeColor = Color.Firebrick;
+                _modelNote.Text = ProviderText.CloudWarning;
+                return true;
+            }
+
+            if (_modelNote.Text == ProviderText.CloudWarning) ShowModelStatus();
+            return false;
+        }
+
+        /// <summary>
         /// The fields that mean something only for some providers. The endpoint
         /// is greyed out for Anthropic, OpenAI and Google because their requests
         /// go to their own servers whatever it says - it used to be open for all
@@ -969,6 +1023,14 @@ namespace Supervertaler.MemoQ.Settings
             }
 
             _fetchModels.Enabled = ModelCatalog.CanFetch(provider);
+
+            if (!ShowCloudWarning()) ShowModelStatus();
+        }
+
+        /// <summary>What the model note says when there is no warning to give.</summary>
+        private void ShowModelStatus()
+        {
+            var provider = CurrentProvider;
             _modelNote.ForeColor = SystemColors.GrayText;
 
             var extra = ModelCatalog.ExtraCount(provider);
@@ -1047,6 +1109,9 @@ namespace Supervertaler.MemoQ.Settings
                 if (extra > 0 && !_showAllModels.Checked) _showAllModels.Checked = true;
                 else ShowModels();
 
+                // A cloud model still chosen keeps its warning over the count.
+                if (ShowCloudWarning()) return;
+
                 _modelNote.ForeColor = SystemColors.GrayText;
                 _modelNote.Text = provider + ": " + fetched.Count + " models"
                     + (extra > 0
@@ -1088,7 +1153,9 @@ namespace Supervertaler.MemoQ.Settings
             SharedSettings.Endpoint = _endpoint.Text.Trim();
             SharedSettings.PromptPath = SelectedPromptPath();
             MemoryBankPicker.Save(MemoryBankPicker.Chosen(_memoryBank));
-            SharedSettings.Parallel = (int)_maxParallel.Value;
+            KeepParallel(CurrentProvider);
+            SharedSettings.Parallel = _cloudParallel;
+            SharedSettings.LocalParallel = _localParallel;
             SharedSettings.BatchSize = (int)_batchSize.Value;
             SharedSettings.UseTerminologyContext = _useTerminology.Checked;
             SharedSettings.UseDocumentContext = _useDocumentContext.Checked;

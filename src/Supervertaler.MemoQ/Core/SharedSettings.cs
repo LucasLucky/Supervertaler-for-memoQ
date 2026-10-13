@@ -48,6 +48,7 @@ namespace Supervertaler.MemoQ.Core
         private const string ModelKey = "model";
         private const string EndpointKey = "endpoint";
         private const string ParallelKey = "parallel";
+        private const string LocalParallelKey = "parallel.local";
         private const string BatchSizeKey = "batchsize";
         private const string TerminologyContextKey = "useterminology";
         private const string DocumentContextKey = "usedocumentcontext";
@@ -217,6 +218,16 @@ namespace Supervertaler.MemoQ.Core
 
         public static int Parallel { get => IntOr(ParallelKey, 4); set => Write(ParallelKey, value.ToString(CultureInfo.InvariantCulture)); }
         public static int ParallelOr(int fromResource) => IntOr(ParallelKey, fromResource);
+
+        /// <summary>
+        /// Parallel requests for a server of the translator's own - Ollama or
+        /// OpenAI-compatible - kept apart from <see cref="Parallel"/>, which is the
+        /// cloud providers' value. One number for both meant choosing Ollama set
+        /// it to 1 and going back to Anthropic left it there, for the user to
+        /// notice and raise again. One by default: a server on one computer
+        /// usually answers one request at a time.
+        /// </summary>
+        public static int LocalParallel { get => IntOr(LocalParallelKey, 1); set => Write(LocalParallelKey, value.ToString(CultureInfo.InvariantCulture)); }
 
         public static int BatchSize { get => IntOr(BatchSizeKey, 20); set => Write(BatchSizeKey, value.ToString(CultureInfo.InvariantCulture)); }
         public static int BatchSizeOr(int fromResource) => IntOr(BatchSizeKey, fromResource);

@@ -70,6 +70,21 @@ namespace Supervertaler.MemoQ.Core
             return new MTException(message, message, ex);
         }
 
+        /// <summary>
+        /// The reply without a closing <c>[[TC: ]]</c> marker that says nothing.
+        /// A comment with text stays where it is - memoQ keeps translator
+        /// comments in the target, for the translator to deal with in review -
+        /// but an empty one is only something to delete. Seen 2026-10-13 from a
+        /// 7B model through Ollama, at the end of an otherwise good translation.
+        /// Core's <see cref="ReplyCheck.WithoutComment"/> already knows the
+        /// marker and removes an empty one; it is asked here only for that.
+        /// </summary>
+        internal static string WithoutEmptyComment(string reply)
+        {
+            var stripped = ReplyCheck.WithoutComment(reply, out var comment);
+            return comment == null ? stripped : reply;
+        }
+
         public static async Task<TranslationResult[]> TranslateAsync(
             Segment[] segments,
             EngineContext context,
@@ -450,6 +465,10 @@ namespace Supervertaler.MemoQ.Core
             // the sources that were sent.
             var parsed = TranslationPrompt.ParseBatchResponse(raw, inputs);
 
+            // What each row's Info names as its source - "Ollama cloud" for a
+            // model that runs on Ollama's servers. Asked once for the batch.
+            var label = await LocalServer.ProviderLabelAsync(general).ConfigureAwait(false);
+
             // A marker the model echoed at the start of a target is removed before
             // it can reach the document, and said so: that line is the evidence,
             // per model, of whether the rule is obeyed. Only when markers were
@@ -486,13 +505,14 @@ namespace Supervertaler.MemoQ.Core
             {
                 var match = parsed.FirstOrDefault(p => p.Number == i + 1);
                 var source = TagBridge.ToTaggedText(chunk[i]);
+                var reply = WithoutEmptyComment(match?.Translation);
 
                 // A reply carrying commentary is not served from the batch (see
                 // ReplyCheck). It is left null, and the caller sends that segment
                 // again on its own through the single-segment path, which asks
                 // with the contract restated and refuses a second offence. The
                 // rest of the batch is unaffected.
-                var problem = ReplyCheck.Problem(source, match?.Translation);
+                var problem = ReplyCheck.Problem(source, reply);
                 if (problem != null)
                 {
                     PluginLog.Write($"reply: retried - {problem}, segment {i + 1} of this batch; "
@@ -500,15 +520,15 @@ namespace Supervertaler.MemoQ.Core
                     continue;
                 }
 
-                var tags = ReplyCheck.TagDifference(source, match?.Translation);
+                var tags = ReplyCheck.TagDifference(source, reply);
                 if (tags != null)
                     PluginLog.Write($"reply: tags differ from the source ({tags}), segment {i + 1} "
                         + "of this batch - served; worth a look");
 
                 results[i] = new TranslationResult
                 {
-                    Translation = TagBridge.FromTaggedText(match?.Translation?.Trim(), chunk[i]),
-                    Info = general.Provider + " / " + general.Model + UpdateCheck.InfoSuffix()
+                    Translation = TagBridge.FromTaggedText(reply?.Trim(), chunk[i]),
+                    Info = label + " / " + general.Model + UpdateCheck.InfoSuffix()
                 };
             }
 

@@ -159,6 +159,10 @@ public static class LocalHarness
             request = () => { throw new TaskCanceledException(); };
         else if (failure == "caller-cancelled")
             request = () => { cts.Cancel(); throw new OperationCanceledException(cts.Token); };
+        else if (failure == "broke-off")
+            request = () => { throw new HttpRequestException("An error occurred while sending the request.",
+                new WebException("The underlying connection was closed: A connection that was expected to be kept alive was closed by the server.",
+                    WebExceptionStatus.KeepAliveFailure)); };
         else if (failure == "refused")
             request = () => { throw new HttpRequestException("An error occurred while sending the request.",
                 new WebException("Unable to connect to the remote server", WebExceptionStatus.ConnectFailure)); };
@@ -189,6 +193,11 @@ public static class LocalHarness
     {
         return Task.Run(() => method.Invoke(target, args)).Wait(milliseconds);
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
+
+    /// The extended window style Windows actually gave a window.
+    public static int ExStyle(IntPtr h) { return GetWindowLong(h, -20); }
 
     /// One real request to Ollama through everything the plugin puts around it.
     public static string Live(string endpoint, string model, string system, string user)
@@ -285,6 +294,8 @@ $o = [LocalHarness]::Outcome('Ollama', 'caller-cancelled')
 Check ($o -like '*CanceledException*') "a caller giving up is still a cancellation ($o)"
 $o = [LocalHarness]::Outcome('Ollama', 'refused')
 Check ($o -like 'InvalidOperationException:*Could not reach Ollama at http://localhost:1*Is it running*') "nothing listening says so ($o)"
+$o = [LocalHarness]::Outcome('Ollama', 'broke-off')
+Check ($o -like 'InvalidOperationException:*broke off before it answered*kept alive*try the segment again*') "a connection that broke off says so, not 'an error occurred' ($o)"
 $o = [LocalHarness]::Outcome('Ollama', 'error')
 Check ($o -like 'HttpRequestException:*500*') "a server that answers badly keeps its own message"
 $o = [LocalHarness]::Outcome('Anthropic', 'timeout')
@@ -302,7 +313,129 @@ Check ([LocalHarness]::Judge(-1, 0, 100000) -eq 'accepted') "no count from the s
 Check ([LocalHarness]::Judge(0, 0, 100000) -eq 'accepted') "a count of zero is no count"
 Check ([LocalHarness]::Judge(100, 0, 4000) -eq 'accepted') "a prompt below 1,500 tokens is not judged"
 
-# ---- 7. a refused batch does not hold the queue ------------------------------
+# ---- 7. Ollama's cloud ---------------------------------------------------------
+# Allowed, and said. The name is what a dialog has; a request asks Ollama's model
+# list, which marks a cloud model with remote_host whatever it is called. The list
+# below is Ollama 0.40.3's own answer for a cloud model pulled on 2026-10-13.
+Write-Host "-- Ollama's cloud"
+foreach ($c in @(
+        @('Ollama', 'gpt-oss:20b-cloud', $true), @('Ollama', 'qwen3-coder:cloud', $true),
+        @('Ollama', 'qwen2.5:7b', $false), @('Ollama', 'cloudy:7b', $false),
+        @('Anthropic', 'gpt-oss:20b-cloud', $false), @('OpenAI-compatible', 'x-cloud', $false))) {
+    $got = P 'IsOllamaCloudModel' @($c[0], $c[1])
+    Check ($got -eq $c[2]) "$($c[0]) '$($c[1])' is $(if ($c[2]) {''} else {'not '})a cloud model"
+}
+
+$localServer = $plugin.GetType('Supervertaler.MemoQ.Core.LocalServer')
+$tags = '{"models":[{"name":"gpt-oss:20b-cloud","model":"gpt-oss:20b-cloud","remote_model":"gpt-oss:20b","remote_host":"https://ollama.com","size":306},' +
+        '{"name":"my-renamed-model:latest","model":"my-renamed-model:latest","remote_host":"https://ollama.com"},' +
+        '{"name":"qwen2.5:7b","model":"qwen2.5:7b","size":4683087332}]}'
+function RemoteHost($model) {
+    $argv = [object[]]@($tags, $model, $false)
+    $h = $localServer.GetMethod('RemoteHostIn', $Static).Invoke($null, $argv)
+    return @($h, $argv[2])
+}
+$r = RemoteHost 'gpt-oss:20b-cloud'
+Check ($r[0] -eq 'https://ollama.com' -and $r[1]) "Ollama's list marks gpt-oss:20b-cloud as running on $($r[0])"
+$r = RemoteHost 'my-renamed-model'
+Check ($r[0] -eq 'https://ollama.com' -and $r[1]) "a cloud model under any name is caught by the list ('my-renamed-model' finds ':latest')"
+$r = RemoteHost 'qwen2.5:7b'
+Check ($null -eq $r[0] -and $r[1]) "a local model is listed with no remote host"
+$r = RemoteHost 'not-installed:1b'
+Check (-not $r[1]) "a model the list lacks is reported as not listed, so the name decides"
+
+$generalT0 = $plugin.GetType('Supervertaler.MemoQ.Settings.SupervertalerGeneralSettings')
+function Label($provider, $model, $endpoint) {
+    $g = [Activator]::CreateInstance($generalT0)
+    $generalT0.GetProperty('Provider').SetValue($g, $provider)
+    $generalT0.GetProperty('Model').SetValue($g, $model)
+    $generalT0.GetProperty('Endpoint').SetValue($g, $endpoint)
+    return $localServer.GetMethod('ProviderLabelAsync', $Static).Invoke($null, @($g)).Result
+}
+Check ((Label 'Anthropic' 'claude-sonnet-5-5' '') -eq 'Anthropic') "a cloud provider is labelled with its name, no request made"
+Check ((Label 'Ollama' 'gpt-oss:20b-cloud' 'http://localhost:1') -eq 'Ollama cloud') "with Ollama unreachable, a cloud name is still labelled 'Ollama cloud'"
+Check ((Label 'Ollama' 'qwen2.5:7b' 'http://localhost:1') -eq 'Ollama') "and a local name 'Ollama'"
+
+# ---- 8. the waiting notice -----------------------------------------------------
+# What it reads out of Ollama's log, and what it says. The lines are Ollama
+# 0.40.3's, from the first Ollama segment ever translated in memoQ (2026-10-13).
+Write-Host "-- the waiting notice"
+$progress = $plugin.GetType('Supervertaler.MemoQ.Core.LocalProgress')
+$parse = $progress.GetMethod('Parse', $Static)
+$describe = $progress.GetMethod('Describe', $Static)
+$log = @(
+    'slot   operator(): id  0 | task 0 | new prompt, n_ctx_slot = 32768, n_keep = 4, task.n_tokens = 44',
+    'slot print_timing: id  0 | task 0 | prompt eval time =    1754.45 ms /    44 tokens (   39.87 ms per token,    25.08 tokens per second)',
+    'slot   operator(): id  0 | task 9 | new prompt, n_ctx_slot = 32768, n_keep = 4, task.n_tokens = 13903',
+    'slot   operator(): id  0 | task 9 | cached n_tokens = 3, memory_seq_rm [3, end)',
+    'slot print_timing: id  0 | task 9 | prompt processing, n_tokens =   9216, progress = 0.66, t = 454.64 s / 20.27 tokens per second',
+    'slot print_timing: id  0 | task 9 | prompt processing, n_tokens =  10240, progress = 0.74, t = 527.22 s / 19.42 tokens per second'
+) -join "`n"
+$reading = $parse.Invoke($null, @($log))
+Check ($reading.Total -eq 13903 -and $reading.Done -eq 10240 -and [math]::Abs($reading.Rate - 19.42) -lt 0.01 -and -not $reading.Writing) `
+    "the log reads as 10,240 of 13,903 tokens at 19.42 a second"
+$text = $describe.Invoke($null, @('Ollama', 'qwen2.5:7b', [TimeSpan]::FromSeconds(527), 1, $reading))
+Check ($text -like '*waiting for Ollama (qwen2.5:7b)*8:47*' -and $text -like '*Reading the prompt: 73% of 13,903 tokens*about 4 minutes left*') "and the notice says so: $(($text -split "`n")[0..1] -join ' / ')"
+Check ($text -like "*The first segment is the slow one*") "and why"
+
+$done = $parse.Invoke($null, @($log + "`nslot print_timing: id  0 | task 9 | prompt eval time =  799400.48 ms / 13900 tokens (   57.51 ms per token,    17.39 tokens per second)"))
+Check ($done.Writing) "a finished prompt is read as writing the answer"
+Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(800), 3, $done)) -like '*now writing the translation*2 more requests are queued*') "which the notice says, with the queue behind it"
+
+# The second request of a job: most of the prompt is in Ollama's cache already.
+$warm = $parse.Invoke($null, @((@(
+    'slot   operator(): id  0 | task 15 | new prompt, n_ctx_slot = 32768, n_keep = 4, task.n_tokens = 13933',
+    'slot   operator(): id  0 | task 15 | cached n_tokens = 13312, memory_seq_rm [13312, end)'
+) -join "`n")))
+Check ($warm.Done -eq 13312 -and $warm.Total -eq 13933) "tokens Ollama had cached count as read (13,312 of 13,933)"
+Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(9), 1, $warm)) -like '*Prompt nearly read (95% of 13,933 tokens); the translation is written next*') "so a warm request shows 95% and what comes next, not 0%"
+
+$quiet = $describe.Invoke($null, @('OpenAI-compatible', 'local-model', [TimeSpan]::FromSeconds(75), 1, $null))
+Check ($quiet -like '*waiting for OpenAI-compatible (local-model)*1:15*' -and $quiet -notlike '*Reading the prompt*') "with no log to read, it says how long, and no more"
+Check ($null -eq $parse.Invoke($null, @('[GIN] 2026/10/13 - 10:47:52 | 200 | 13m22s | POST "/api/chat"'))) "a log it cannot read gives no progress rather than a wrong one"
+
+# Always on top, by its own window style. WinForms' TopMost is applied on
+# activation and this window is never activated, so it came up as an ordinary
+# window: the first click into memoQ's grid covered it, and in memoQ on
+# 2026-10-13 it was visible to Windows and to nobody for ten minutes.
+$noticeT = $progress.GetNestedType('NoticeForm', [Reflection.BindingFlags]'NonPublic')
+$notice = [Activator]::CreateInstance($noticeT, [Reflection.BindingFlags]'Instance,Public,NonPublic', $null, @([object]::new()), $null)
+try {
+    $ex = [LocalHarness]::ExStyle($notice.Handle)
+    Check (($ex -band 0x8) -ne 0) "the notice window is always on top (style 0x$('{0:X}' -f $ex))"
+    Check (($ex -band 0x08000000) -ne 0) "and never takes the keyboard from memoQ"
+}
+finally { $notice.Dispose() }
+
+# ---- 9. the language beside the segment -----------------------------------------
+# A 7B model given a 14,000-token prompt returned "Summary of the invention" in
+# English (2026-10-13): the pair was stated once, 13,000 tokens back. It is now
+# restated beside the segment, in the single request and the batch alike.
+Write-Host "-- the language beside the segment"
+$mtAsm = [Reflection.Assembly]::LoadFrom("$MemoQPath\MemoQ.MTInterfaces.dll")
+$commonAsm = [Reflection.Assembly]::LoadFrom("$MemoQPath\MemoQ.Addins.Common.dll")
+$bundleT = $mtAsm.GetType('MemoQ.MTInterfaces.TranslationBundle')
+$bundle = [Activator]::CreateInstance($bundleT)
+$seg = $commonAsm.GetType('MemoQ.Addins.Common.DataStructures.SegmentBuilder').GetMethod('CreateFromString').Invoke($null, @('Summary of the invention'))
+$bundleT.GetMember('Source')[0].SetValue($bundle, $seg)
+$builder = $plugin.GetType('Supervertaler.MemoQ.Core.PromptBuilder')
+$structureOff = [Enum]::ToObject($plugin.GetType('Supervertaler.Core.StructureContextMode'), 0)
+$gs = [Activator]::CreateInstance($generalT0)
+$single = $builder.GetMethod('Build').Invoke($null, @($bundle, $gs, 'eng', 'nld', $null, $null, $null, 'Translate well.', $null, $structureOff, $null))
+Check ($single.User -match "Translate from English into Dutch\.\r?\n\r?\nSource segment:\r?\nSummary of the invention") "the single request restates the pair beside the segment"
+$batch = $builder.GetMethod('BuildForBatch').Invoke($null, @($gs, 'eng', 'nld', $null, $null, $null, 'Translate well.', $null, $structureOff))
+Check ($batch.User.TrimEnd().EndsWith('Translate from English into Dutch.')) "and a batch ends its context with it, just before its numbered segments"
+
+# An empty translator comment is deleted; a real one stays in the target, where
+# memoQ keeps them for review. Segment 10 of the first Ollama test ended in "[[TC:]]".
+$noEmpty = $plugin.GetType('Supervertaler.MemoQ.Core.BatchTranslator').GetMethod('WithoutEmptyComment', $Static)
+function Clean($s) { $noEmpty.Invoke($null, @($s)) }
+Check ((Clean 'aan de sensor (4) en aan de lichtbron (3).[[TC:]]') -eq 'aan de sensor (4) en aan de lichtbron (3).') "an empty [[TC:]] at the end is removed"
+Check ((Clean "aan de lichtbron (3). [[TC:  ]]") -eq 'aan de lichtbron (3).') "and one holding only spaces"
+Check ((Clean 'De lamp (1). [[TC: "lamp" or "lampje"? Please check.]]') -eq 'De lamp (1). [[TC: "lamp" or "lampje"? Please check.]]') "a comment with text is kept"
+Check ((Clean 'De lamp (1).') -eq 'De lamp (1).') "a reply without one is untouched"
+
+# ---- 10. a refused batch does not hold the queue -----------------------------
 # The first batch of a run takes a gate so it can warm the prompt cache alone,
 # and opens it in a finally. CreateClient refuses by throwing; when it ran inside
 # the gate and outside that finally, the first batch failed with the gate shut
@@ -361,7 +494,7 @@ else {
     }
 }
 
-# ---- 8. both settings dialogs ------------------------------------------------
+# ---- 11. both settings dialogs -----------------------------------------------
 # The endpoint box used to be open for every provider, with a hint promising a
 # local model, and core ignored it for all three it was offered with. Now it is
 # open only where it is read, the key box is shut where no key is sent, and a
@@ -385,8 +518,8 @@ $editorExe = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ\src\Supervertaler.
 $editor = [Reflection.Assembly]::LoadFrom($editorExe)
 
 $dialogs = @(
-    @{ Name = "memoQ's dialog"; Make = { [Activator]::CreateInstance($plugin.GetType('Supervertaler.MemoQ.Settings.OptionsForm'), $Ctor, $null, @($settings), $null) }; Parallel = '_maxParallel'; Hint = '_endpointHint' }
-    @{ Name = "the editor's dialog"; Make = { [Activator]::CreateInstance($editor.GetType('Supervertaler.PromptEditor.SettingsForm'), $Ctor, $null, @(), $null) }; Parallel = '_parallel'; Hint = '_endpointHint' }
+    @{ Name = "memoQ's dialog"; Make = { [Activator]::CreateInstance($plugin.GetType('Supervertaler.MemoQ.Settings.OptionsForm'), $Ctor, $null, @($settings), $null) }; Parallel = '_maxParallel'; Hint = '_endpointHint'; Note = '_modelNote' }
+    @{ Name = "the editor's dialog"; Make = { [Activator]::CreateInstance($editor.GetType('Supervertaler.PromptEditor.SettingsForm'), $Ctor, $null, @(), $null) }; Parallel = '_parallel'; Hint = '_endpointHint'; Note = '_modelStatus' }
 )
 
 foreach ($d in $dialogs) {
@@ -398,6 +531,8 @@ foreach ($d in $dialogs) {
         $parallel = Field $form $d.Parallel
         $hint = Field $form $d.Hint
         $model = Field $form '_model'
+        $note = Field $form $d.Note
+        $startLocal = Field $form '_localParallel'
 
         Check (@($provider.Items) -contains 'Ollama' -and @($provider.Items) -contains 'OpenAI-compatible') "$($d.Name) offers Ollama and OpenAI-compatible"
 
@@ -409,30 +544,52 @@ foreach ($d in $dialogs) {
         $provider.SelectedItem = 'Ollama'
         Check ($endpoint.Enabled) "$($d.Name): Ollama opens the endpoint"
         Check (-not $key.Enabled -and $key.Text -eq '') "$($d.Name): Ollama shuts the key box"
-        Check ($parallel.Value -eq 1) "$($d.Name): Ollama starts at one request at a time"
+        Check ($parallel.Value -eq $startLocal) "$($d.Name): Ollama shows the local servers' own Parallel requests ($($parallel.Value)), not Anthropic's 5"
+        $parallel.Value = 2
         Check ($hint.Text -like '*localhost:11434*') "$($d.Name): the hint says where Ollama is looked for"
         Check (@($model.Items | ForEach-Object { $_.Id }) -contains 'translategemma:12b') "$($d.Name): Ollama suggests models to download"
 
         # A model from Fetch list, which Ollama names by id only, chosen and
         # read back as the dialog would send it. 0.1.12 sent "(qwen2.5:7b)".
         $cachePath = $catalog.GetMethod('CacheFile', $Static).Invoke($null, @('Ollama'))
-        [IO.File]::WriteAllLines($cachePath, @('qwen2.5:7b', 'mixtral:8x7b'), (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllLines($cachePath, @('qwen2.5:7b', 'mixtral:8x7b', 'gpt-oss:20b-cloud'), (New-Object Text.UTF8Encoding($false)))
+        # Off, then on: a box that opened ticked - the user's saved choice - does
+        # not reload the list when ticked again.
+        (Field $form '_showAllModels').Checked = $false
         (Field $form '_showAllModels').Checked = $true
         $fetched = @($model.Items | Where-Object { $_.Id -eq 'qwen2.5:7b' })
         Check ($fetched.Count -eq 1 -and $fetched[0].ToString() -eq 'qwen2.5:7b') "$($d.Name): a fetched model is shown as its id ('$($fetched[0])')"
         $model.SelectedItem = $fetched[0]
         $chosen = $form.GetType().GetMethod('ChosenModelId', $Instance).Invoke($form, @())
         Check ($chosen -eq 'qwen2.5:7b') "$($d.Name): and choosing it sends '$chosen'"
+
+        # Ollama's cloud: allowed, and said - in the list, and under the box.
+        $cloudItem = @($model.Items | Where-Object { $_.Id -eq 'gpt-oss:20b-cloud' })
+        Check ($cloudItem.Count -eq 1 -and $cloudItem[0].ToString() -like "*Ollama's servers*") "$($d.Name): a fetched cloud model says so in the list ('$($cloudItem[0])')"
+        $model.SelectedItem = $cloudItem[0]
+        Check ($note.Text -like "Cloud model:*" -and $note.ForeColor -eq [Drawing.Color]::Firebrick) "$($d.Name): choosing it puts the warning under the box"
+        $chosen = $form.GetType().GetMethod('ChosenModelId', $Instance).Invoke($form, @())
+        Check ($chosen -eq 'gpt-oss:20b-cloud') "$($d.Name): and it can still be chosen ('$chosen')"
+        $model.Text = 'qwen3-coder:cloud'
+        Check ($note.Text -like "Cloud model:*") "$($d.Name): a typed ':cloud' model is warned about too"
+        $model.Text = 'qwen2.5:7b'
+        Check ($note.Text -notlike "Cloud model:*") "$($d.Name): a local model takes the warning away ('$($note.Text)')"
+        $w = [Windows.Forms.TextRenderer]::MeasureText('Cloud model: your text goes to Ollama''s servers, not this computer.', $note.Font).Width
+        Check ($w -le $note.Width) "$($d.Name): the warning fits ($w of $($note.Width) px)"
         (Field $form '_showAllModels').Checked = $false
 
-        $parallel.Value = 3
         $provider.SelectedItem = 'OpenAI-compatible'
         Check ($endpoint.Enabled -and $key.Enabled) "$($d.Name): OpenAI-compatible opens the endpoint and the key box"
         Check ($model.Items.Count -eq 0) "$($d.Name): OpenAI-compatible offers no other provider's models ($($model.Items.Count) listed)"
         Check ($model.Text -eq '') "$($d.Name): and keeps none in the box"
 
+        Check ($parallel.Value -eq 2) "$($d.Name): OpenAI-compatible shares the local servers' value"
+
         $provider.SelectedItem = 'Google'
-        Check ($parallel.Value -eq 1) "$($d.Name): leaving a local server does not change Parallel requests"
+        Check ($parallel.Value -eq 5) "$($d.Name): back on a cloud provider, the cloud value is back ($($parallel.Value))"
+        $provider.SelectedItem = 'Ollama'
+        Check ($parallel.Value -eq 2) "$($d.Name): and the local one is kept for the next switch"
+        Check ((Field $form '_cloudParallel') -eq 5) "$($d.Name): with the cloud value parked meanwhile"
 
         # Rewritten after the layout is fixed, so each must fit on its row.
         foreach ($p in 'Anthropic', 'Ollama', 'OpenAI-compatible') {
@@ -444,7 +601,7 @@ foreach ($d in $dialogs) {
     finally { $form.Dispose() }
 }
 
-# ---- 9. a real Ollama, when there is one -------------------------------------
+# ---- 12. a real Ollama, when there is one ------------------------------------
 Write-Host "-- live Ollama"
 # The dialogs left a WinForms context on this thread; see Live() for why that hangs.
 [Threading.SynchronizationContext]::SetSynchronizationContext($null)

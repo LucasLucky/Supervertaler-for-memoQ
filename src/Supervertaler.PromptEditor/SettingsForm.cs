@@ -114,15 +114,11 @@ namespace Supervertaler.PromptEditor
             {
                 if (_loading) return;
                 RememberTypedKey();
+                KeepParallel(_lastProvider);
                 _lastProvider = Provider;
                 _modelId = "";
 
-                // A server of the translator's own usually answers one request
-                // at a time, and anything sent beyond that waits there with its
-                // time limit running. Only on a switch: a value raised on purpose
-                // for a server that can take more is kept from then on.
-                if (LlmProviders.TakesEndpoint(Provider)) _parallel.Value = 1;
-
+                ShowParallel(Provider);
                 ShowForProvider();
                 ShowKeyFor(Provider);
                 ShowModels();
@@ -143,6 +139,9 @@ namespace Supervertaler.PromptEditor
             {
                 if (_model.SelectedItem is ModelCatalog.Entry entry) _modelId = entry.Id;
             };
+
+            // Picked or typed, a cloud model is said to be one at once.
+            _model.TextChanged += (s, e) => { if (!_loading) ShowCloudWarning(); };
             Controls.Add(_model);
             y += rowH;
 
@@ -212,6 +211,12 @@ namespace Supervertaler.PromptEditor
             _parallel.Left = fieldX; _parallel.Top = y; _parallel.Width = 70;
             _parallel.Minimum = 1; _parallel.Maximum = 16;
             Controls.Add(_parallel);
+
+            Controls.Add(new Label
+            {
+                Text = ProviderText.ParallelHint,
+                Left = fieldX + 84, Top = y + 3, AutoSize = true, ForeColor = SystemColors.GrayText
+            });
             y += rowH;
 
             Caption("Segments per batch", y);
@@ -362,6 +367,14 @@ namespace Supervertaler.PromptEditor
             Show(ModelCatalog.Entries(provider, _showAllModels.Checked));
 
             _fetchModels.Enabled = ModelCatalog.CanFetch(provider);
+
+            if (!ShowCloudWarning()) ShowModelStatus();
+        }
+
+        /// <summary>What the model status says when there is no warning to give.</summary>
+        private void ShowModelStatus()
+        {
+            var provider = Provider;
             _modelStatus.ForeColor = SystemColors.GrayText;
 
             var extra = ModelCatalog.ExtraCount(provider);
@@ -375,6 +388,49 @@ namespace Supervertaler.PromptEditor
             else
                 _modelStatus.Text = "Provider list fetched " + on + "; " + extra
                     + (extra == 1 ? " model" : " models") + " beyond the short list.";
+        }
+
+        /// <summary>
+        /// Puts the cloud warning in the model status while an Ollama cloud model
+        /// is chosen, and returns whether it did. Otherwise leaves the status to
+        /// say what it was saying, unless that was the warning itself.
+        /// </summary>
+        private bool ShowCloudWarning()
+        {
+            if (_modelStatus == null) return false;
+
+            if (LlmProviders.IsOllamaCloudModel(Provider, ChosenModelId()))
+            {
+                _modelStatus.ForeColor = Color.Firebrick;
+                _modelStatus.Text = ProviderText.CloudWarning;
+                return true;
+            }
+
+            if (_modelStatus.Text == ProviderText.CloudWarning) ShowModelStatus();
+            return false;
+        }
+
+        /// <summary>
+        /// Parallel requests for the cloud providers and for a server of the
+        /// translator's own, kept apart. One box shows whichever applies to the
+        /// provider chosen, so choosing Ollama shows Ollama's value and going
+        /// back to Anthropic shows Anthropic's again - nothing to remember to
+        /// undo, which the single value it replaced required.
+        /// </summary>
+        private int _cloudParallel = 4;
+        private int _localParallel = 1;
+
+        /// <summary>Parks the box's value with the kind of provider it was showing.</summary>
+        private void KeepParallel(string provider)
+        {
+            if (string.IsNullOrEmpty(provider)) return;
+            if (LlmProviders.TakesEndpoint(provider)) _localParallel = (int)_parallel.Value;
+            else _cloudParallel = (int)_parallel.Value;
+        }
+
+        private void ShowParallel(string provider)
+        {
+            _parallel.Value = LlmProviders.TakesEndpoint(provider) ? _localParallel : _cloudParallel;
         }
 
         /// <summary>
@@ -411,6 +467,9 @@ namespace Supervertaler.PromptEditor
                 // repopulates by itself, so only populate here when it was on.
                 if (extra > 0 && !_showAllModels.Checked) _showAllModels.Checked = true;
                 else ShowModels();
+
+                // A cloud model still chosen keeps its warning over the count.
+                if (ShowCloudWarning()) return;
 
                 _modelStatus.ForeColor = SystemColors.GrayText;
                 _modelStatus.Text = provider + ": " + fetched.Count + " models"
@@ -612,7 +671,9 @@ namespace Supervertaler.PromptEditor
             _modelId = SharedSettings.ModelOr("claude-opus-5-5");
             _model.Text = _modelId;
             _endpoint.Text = SharedSettings.EndpointOr(string.Empty);
-            _parallel.Value = Math.Max(1, Math.Min(16, SharedSettings.ParallelOr(4)));
+            _cloudParallel = Math.Max(1, Math.Min(16, SharedSettings.ParallelOr(4)));
+            _localParallel = Math.Max(1, Math.Min(16, SharedSettings.LocalParallel));
+            ShowParallel(Provider);
             _batchSize.Value = Math.Max(1, Math.Min(100, SharedSettings.BatchSizeOr(20)));
             _useTerminology.Checked = SharedSettings.UseTerminologyContextOr(true);
             _useDocumentContext.Checked = SharedSettings.UseDocumentContextOr(true);
@@ -637,7 +698,9 @@ namespace Supervertaler.PromptEditor
             SharedSettings.Provider = (_provider.SelectedItem as string) ?? LlmProviders.Anthropic;
             SharedSettings.Model = ChosenModelId();
             SharedSettings.Endpoint = _endpoint.Text.Trim();
-            SharedSettings.Parallel = (int)_parallel.Value;
+            KeepParallel(Provider);
+            SharedSettings.Parallel = _cloudParallel;
+            SharedSettings.LocalParallel = _localParallel;
             SharedSettings.BatchSize = (int)_batchSize.Value;
             SharedSettings.UseTerminologyContext = _useTerminology.Checked;
             SharedSettings.UseDocumentContext = _useDocumentContext.Checked;

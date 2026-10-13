@@ -67,6 +67,26 @@ namespace Supervertaler.MemoQ.Settings
         }
 
         /// <summary>
+        /// True when the name says this Ollama model runs on Ollama's servers
+        /// rather than on the computer Ollama is on. Ollama names its cloud models
+        /// with a "-cloud" ending or a ":cloud" tag, and checks for exactly those
+        /// two itself (found in ollama.exe 0.40.3, 2026-10-13).
+        ///
+        /// <para>The name is what a dialog has to go on while the model is being
+        /// typed. A request asks Ollama instead - its model list marks a cloud
+        /// model with remote_host, whatever the model is called - and falls back
+        /// on this. Allowed, never refused: the translator is told, and
+        /// decides.</para>
+        /// </summary>
+        public static bool IsOllamaCloudModel(string provider, string model)
+        {
+            if (!string.Equals(provider, Ollama, StringComparison.OrdinalIgnoreCase)) return false;
+            var name = (model ?? string.Empty).Trim();
+            return name.EndsWith("-cloud", StringComparison.OrdinalIgnoreCase)
+                || name.EndsWith(":cloud", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// Whether a request cannot be made without a key. Ollama has none, and a
         /// server of the translator's own may or may not want one.
         /// </summary>
