@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Supervertaler.Core;
@@ -44,23 +45,57 @@ namespace Supervertaler.MemoQ.Core
         /// <param name="client">The client <paramref name="request"/> uses; its usage is read afterwards.</param>
         /// <param name="user">The user prompt sent, for judging how much of it was read.</param>
         /// <param name="system">The system prompt sent, likewise.</param>
+        /// <param name="turn">
+        /// What the request is for, which decides its place in the queue (see
+        /// <see cref="LocalQueue"/>). Null: someone is looking at the answer.
+        /// </param>
         public static async Task<string> AskAsync(
             SupervertalerGeneralSettings general,
             LlmClient client,
             Func<Task<string>> request,
             string user,
             string system,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            LocalQueue.Turn turn = null)
         {
             if (!LlmProviders.TakesEndpoint(general.Provider))
                 return await request().ConfigureAwait(false);
 
-            // From the moment it starts waiting, queue included: the translator
-            // is waiting from then too. Disposed however the request ends.
-            using (LocalProgress.Begin(general))
+            // The same segment already waiting or under way: its answer, not a
+            // second model call. memoQ asks again for a segment it is waiting on.
+            var identity = LocalQueue.Identity(general, user, system, turn);
+            var flight = LocalQueue.JoinOrOpen(identity, out var joined);
+            if (flight == null) return await joined.ConfigureAwait(false);
+
+            try
             {
-                return await AskQueuedAsync(general, client, request, user, system, cancellationToken)
-                    .ConfigureAwait(false);
+                // From the moment it starts waiting, queue included: the
+                // translator is waiting from then too. Disposed however the
+                // request ends.
+                string reply;
+                var asked = DateTime.UtcNow;
+                using (LocalProgress.Begin(general))
+                {
+                    reply = await AskQueuedAsync(general, client, request, user, system, cancellationToken, turn, flight, asked)
+                        .ConfigureAwait(false);
+                }
+
+                flight.Answer.TrySetResult(reply);
+                return reply;
+            }
+            catch (OperationCanceledException)
+            {
+                flight.Answer.TrySetCanceled();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                flight.Answer.TrySetException(ex);
+                throw;
+            }
+            finally
+            {
+                LocalQueue.Close(identity, flight);
             }
         }
 
@@ -70,16 +105,36 @@ namespace Supervertaler.MemoQ.Core
             Func<Task<string>> request,
             string user,
             string system,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            LocalQueue.Turn turn,
+            LocalQueue.Flight flight,
+            DateTime asked)
         {
-            var gate = Gate(general.MaxParallelRequests);
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var parallel = general.MaxParallelRequests;
+            await LocalQueue.EnterAsync(parallel, turn, flight, cancellationToken).ConfigureAwait(false);
             try
             {
+                // Asked when the turn comes, not when the request was made: the
+                // translator may have confirmed the segment while it waited.
+                if (turn?.Overtaken != null && turn.Overtaken())
+                {
+                    PluginLog.Write("queue: a segment confirmed while it waited is not sent");
+                    throw new LocalQueue.OvertakenException();
+                }
+
+                // Asked when the turn comes too, never before the request joins
+                // the line: a lookup there would let a request memoQ made later
+                // overtake one still waiting for its answer.
+                var window = await ModelWindowAsync(general).ConfigureAwait(false);
+                RefuseIfTooLarge(general.Model, window, user, system);
+
                 string reply;
+                var work = LocalProgress.Working(turn?.Label);
                 try
                 {
                     reply = await request().ConfigureAwait(false);
+                    EnsureWholePromptRead(client.LastUsage, user, system, general.Model, window);
+                    work.Answered(turn?.Interactive ?? true, asked);
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
@@ -113,20 +168,116 @@ namespace Supervertaler.MemoQ.Core
                         + Address(general) + " broke off before it answered (" + Innermost(ex).Message
                         + "). If it was restarting - after an update, say - try the segment again.", ex);
                 }
+                finally
+                {
+                    work.Dispose();
+                }
 
-                EnsureWholePromptRead(client.LastUsage, user, system);
                 return reply;
             }
             finally
             {
-                // The semaphore this request took, not whichever is current: a
-                // change of setting while it ran replaces the gate, and releasing
-                // the new one would let one request too many through it.
-                gate.Release();
+                // However the request ended - answered, refused, failed - its place
+                // goes to whoever is next.
+                LocalQueue.Leave(parallel);
             }
         }
 
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+
+        // -- the model's own limit -----------------------------------------------
+
+        /// <summary>
+        /// The most tokens the model can hold at all, as Ollama reports it, or
+        /// null when there is no asking: another kind of server, no answer, a
+        /// model Ollama does not have.
+        ///
+        /// <para>A model's window is part of the model, and no setting raises it.
+        /// Ollama loads each model with the smaller of its own window and the
+        /// Context length setting: measured 2026-10-13, under one setting of
+        /// 32,768, qwen2.5:7b loaded with 32,768 and aya-expanse:8b with 8,192.
+        /// One local request, asked for every request rather than remembered:
+        /// about a tenth of a second, beside answers that take half a minute or
+        /// more.</para>
+        /// </summary>
+        internal static async Task<int?> ModelWindowAsync(SupervertalerGeneralSettings general)
+        {
+            if (!string.Equals(general.Provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase)) return null;
+
+            var model = (general.Model ?? string.Empty).Trim();
+            if (model.Length == 0) return null;
+
+            try
+            {
+                var body = new StringContent(
+                    "{\"model\":\"" + model.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"}",
+                    Encoding.UTF8, "application/json");
+                using (var response = await Http.PostAsync(LlmProviders.OllamaAddress(general.Endpoint) + "/api/show", body)
+                           .ConfigureAwait(false))
+                {
+                    if (!response.IsSuccessStatusCode) return null;
+                    return WindowIn(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+                }
+            }
+            catch (Exception)
+            {
+                // No judgement, and the request goes as it always has.
+                return null;
+            }
+        }
+
+        private static readonly Regex ContextLength = new Regex(
+            "\"[A-Za-z0-9_.-]+\\.context_length\"\\s*:\\s*(?<n>\\d+)", RegexOptions.Compiled);
+
+        /// <summary>
+        /// The window in Ollama's description of a model: model_info carries it
+        /// under the architecture's name - "qwen2.context_length",
+        /// "command-r.context_length" - so the key is matched, not named.
+        /// </summary>
+        internal static int? WindowIn(string showJson)
+        {
+            if (string.IsNullOrEmpty(showJson)) return null;
+
+            var info = showJson.IndexOf("\"model_info\"", StringComparison.Ordinal);
+            if (info < 0) return null;
+
+            var m = ContextLength.Match(showJson, info);
+            return m.Success && int.TryParse(m.Groups["n"].Value, out var n) && n > 0 ? n : (int?)null;
+        }
+
+        /// <summary>
+        /// Refuses, before anything is sent, a prompt far larger than the model
+        /// can hold.
+        ///
+        /// <para>With the shared memory bank, a memoQ prompt was 16,446 tokens
+        /// to aya-expanse:8b, whose window is 8,192. Ollama kept 4,099 of them
+        /// and answered after five minutes of reading, and only then did
+        /// <see cref="EnsureWholePromptRead"/> refuse the answer - with advice to
+        /// raise a setting that cannot help. Judged on core's estimate, so only
+        /// when the prompt is half as large again as the window: real tokenisers
+        /// land within a third of the estimate, so such a prompt cannot fit.
+        /// Nearer the line the request goes, and the server's own count
+        /// decides.</para>
+        /// </summary>
+        internal static void RefuseIfTooLarge(string model, int? window, string user, string system)
+        {
+            if (window == null) return;
+
+            var sent = TokenEstimator.EstimateInputTokens(user, system);
+            if (sent < MinTokensToJudge || sent <= window.Value * 3L / 2) return;
+
+            PluginLog.Write($"local server: about {sent:N0} prompt tokens for a model that holds {window.Value:N0}; not sent");
+            throw new ContextTooSmallException($"Not sent: {Name(model)} can hold at most {window.Value:N0} tokens, "
+                + $"and this prompt is about {sent:N0}. " + ModelLimit);
+        }
+
+        /// <summary>What to do when the model itself is too small for the prompt.</summary>
+        private const string ModelLimit = "That limit is part of the model, and no setting raises it. Choose a "
+            + "model that holds more, or send less: switching off \"Send the memory bank to the model\" in "
+            + "Settings usually does it.";
+
+        private static string Name(string model) =>
+            string.IsNullOrWhiteSpace(model) ? "the model" : model.Trim();
 
         // -- Ollama's cloud ------------------------------------------------------
 
@@ -262,30 +413,6 @@ namespace Supervertaler.MemoQ.Core
             return false;
         }
 
-        private static readonly object GateLock = new object();
-        private static SemaphoreSlim _gate;
-        private static int _gateSize;
-
-        /// <summary>
-        /// The gate for this many requests at once. A new size gets a new gate and
-        /// the old one is left to the requests still holding it, so for as long as
-        /// those take, both sizes are in use. That overlap is the price of not
-        /// resizing a semaphore in place, which is where a clever lock goes wrong.
-        /// </summary>
-        private static SemaphoreSlim Gate(int parallel)
-        {
-            var size = Math.Max(1, Math.Min(16, parallel));
-            lock (GateLock)
-            {
-                if (_gate == null || _gateSize != size)
-                {
-                    _gate = new SemaphoreSlim(size, size);
-                    _gateSize = size;
-                }
-                return _gate;
-            }
-        }
-
         /// <summary>
         /// Below this, a prompt is not judged. Nothing that short is cut by any
         /// server's context window, and the estimate is too rough to compare at
@@ -313,7 +440,8 @@ namespace Supervertaler.MemoQ.Core
         /// is four characters a token, and real tokenisers land within a third of
         /// that either way. No count, no judgement.</para>
         /// </summary>
-        internal static void EnsureWholePromptRead(ApiUsage usage, string user, string system)
+        internal static void EnsureWholePromptRead(ApiUsage usage, string user, string system,
+            string model = null, int? window = null)
         {
             if (usage == null) return;
 
@@ -324,7 +452,7 @@ namespace Supervertaler.MemoQ.Core
             if (read <= 0 || read * 2L >= sent) return;
 
             PluginLog.Write($"local server: read {read:N0} of about {sent:N0} prompt tokens; reply refused");
-            throw new ContextTooSmallException(TooSmallMessage(read, sent));
+            throw new ContextTooSmallException(TooSmallMessage(read, sent, model, window));
         }
 
         /// <summary>
@@ -338,21 +466,36 @@ namespace Supervertaler.MemoQ.Core
             public ContextTooSmallException(string message) : base(message) { }
         }
 
-        internal static string TooSmallMessage(int read, int sent)
+        /// <param name="window">
+        /// The model's own window, when known. A prompt larger than that is not
+        /// fixed by any setting, and saying "raise the context length" sent the
+        /// translator to a setting that could not help.
+        /// </param>
+        internal static string TooSmallMessage(int read, int sent, string model = null, int? window = null)
         {
-            return $"The model's server read only {read:N0} of about {sent:N0} tokens of the prompt. The rest - "
-                + "instructions, glossary, memory bank - was cut off, so the answer was not used. Raise the "
-                + "server's context length to at least " + Suggested(sent) + ": in Ollama, Settings > "
-                + "Context length (or OLLAMA_CONTEXT_LENGTH), then restart it; in LM Studio, the model's "
-                + "Context Length when it is loaded.";
+            var text = $"The model's server read only {read:N0} of about {sent:N0} tokens of the prompt. The rest - "
+                + "instructions, glossary, memory bank - was cut off, so the answer was not used. ";
+
+            if (window != null && sent >= window.Value)
+                return text + $"{Name(model)} can hold at most {window.Value:N0} tokens. " + ModelLimit;
+
+            return text + "Raise the server's context length to at least " + Suggested(sent, window)
+                + ": in Ollama, Settings > Context length (or OLLAMA_CONTEXT_LENGTH), then restart it; in "
+                + "LM Studio, the model's Context Length when it is loaded.";
         }
 
-        /// <summary>The next of the sizes the servers offer that fits the prompt and a reply.</summary>
-        private static string Suggested(int sent)
+        /// <summary>
+        /// The next of the sizes the servers offer that fits the prompt and a
+        /// reply, and no more than the model holds. Ollama cuts a prompt only
+        /// when it fills the whole window (llama_server.go, read 2026-10-13), so
+        /// the reply is the only room needed beside it.
+        /// </summary>
+        private static string Suggested(int sent, int? window)
         {
             var needed = sent + 4096;
             var size = 8192;
             while (size < needed && size < 262144) size *= 2;
+            if (window != null && size > window.Value) size = window.Value;
             return size.ToString("N0") + " tokens";
         }
     }

@@ -38,6 +38,7 @@ namespace Supervertaler.PromptEditor
         private readonly CheckBox _sendMemoryBank = new CheckBox();
         private readonly CheckBox _bridgeMode = new CheckBox();
         private readonly CheckBox _usageStats = new CheckBox();
+        private readonly CheckBox _keepLoaded = new CheckBox();
         private readonly TextBox _apiKey = new TextBox();
         private Label _apiKeySource;
 
@@ -206,6 +207,19 @@ namespace Supervertaler.PromptEditor
             };
             Controls.Add(_endpointHint);
             y += 17 + 10;
+
+            // Ollama only, and Ollama's own setting rather than Supervertaler's -
+            // see OllamaKeepAlive. A box to tick, never a default: it holds the
+            // model's memory for as long as Ollama runs.
+            _keepLoaded.Text = "Keep the model loaded while Ollama runs";
+            _keepLoaded.Left = fieldX; _keepLoaded.Top = y; _keepLoaded.AutoSize = true;
+            Controls.Add(_keepLoaded);
+            y += 24;
+            Hint("Otherwise Ollama unloads it after five idle minutes, and the next segment reads all the "
+                + "instructions again. This is Ollama's own setting, for every program that uses it, and the "
+                + "model keeps its memory until Ollama is quit. Restart Ollama after changing it.",
+                fieldX + 18, fieldW - 18);
+            y += 12;
 
             Caption("Parallel requests", y);
             _parallel.Left = fieldX; _parallel.Top = y; _parallel.Width = 70;
@@ -615,6 +629,7 @@ namespace Supervertaler.PromptEditor
         {
             _endpoint.Enabled = LlmProviders.TakesEndpoint(Provider);
             _endpointHint.Text = ProviderText.EndpointHint(Provider);
+            _keepLoaded.Enabled = string.Equals(Provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase);
             _apiKey.Enabled = !string.Equals(Provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -680,6 +695,7 @@ namespace Supervertaler.PromptEditor
             _sendMemoryBank.Checked = SharedSettings.SendMemoryBank;
             _bridgeMode.Checked = SharedSettings.BridgeMode;
             _usageStats.Checked = SharedSettings.UsageStats;
+            _keepLoaded.Checked = OllamaKeepAlive.IsForever(OllamaKeepAlive.Current());
 
             // Null for the resource: this program cannot read memoQ's settings, and
             // does not need to, because memoQ copies that key into the shared file.
@@ -723,6 +739,27 @@ namespace Supervertaler.PromptEditor
 
             if (!ApiKeys.Remember(Provider, _apiKey.Text.Trim())) wrote = false;
             if (wrote) SharedSettings.ApiKey = string.Empty;
+
+            // Last: it is Windows's setting, not ours, and Ollama only reads it
+            // when it starts - said now, while the translator is looking.
+            try
+            {
+                if (OllamaKeepAlive.Set(_keepLoaded.Checked))
+                {
+                    MessageBox.Show(this,
+                        (_keepLoaded.Checked
+                            ? "Ollama will keep the model loaded for as long as it runs."
+                            : "Ollama will unload the model again after five idle minutes.")
+                        + "\r\n\r\nRestart Ollama for this to take effect: right-click its icon by the clock, "
+                        + "choose Quit Ollama, then start it again.",
+                        "Translation settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not change Ollama's setting: " + ex.Message,
+                    "Translation settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
     }
 }

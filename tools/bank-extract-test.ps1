@@ -83,6 +83,8 @@ try {
         [Reflection.BindingFlags]'Instance,Public,NonPublic', $null, @($settings, 'eng', 'nld'), $null)
 
     $shared.GetProperty('MemoryBank', $Static).SetValue($null, 'acme')
+    # On, whatever the user last chose: switched off, nothing from any bank is sent.
+    $shared.GetProperty('SendMemoryBank', $Static).SetValue($null, $true)
     # A cloud provider selects; a local server is sent the bank whole (4a). Set
     # here, not inherited: the shared file is the user's own, and may say Ollama.
     $shared.GetProperty('Provider', $Static).SetValue($null, 'Anthropic')

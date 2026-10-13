@@ -73,6 +73,8 @@ public static class LocalHarness
         createClient = plugin.GetType("Supervertaler.MemoQ.Settings.LlmProviders", true).GetMethod("CreateClient", Any);
         generalType = plugin.GetType("Supervertaler.MemoQ.Settings.SupervertalerGeneralSettings", true);
         usageType = plugin.GetType("Supervertaler.Core.ApiUsage", true);
+        queueType = plugin.GetType("Supervertaler.MemoQ.Core.LocalQueue", true);
+        turnType = queueType.GetNestedType("Turn", BindingFlags.NonPublic | BindingFlags.Public);
     }
 
     static object General(string provider, string model, int parallel, string endpoint)
@@ -92,9 +94,97 @@ public static class LocalHarness
     }
 
     static Task<string> Ask(object general, object client, Func<Task<string>> request,
-                            string user, string system, CancellationToken ct)
+                            string user, string system, CancellationToken ct, object turn = null)
     {
-        return (Task<string>)askAsync.Invoke(null, new object[] { general, client, request, user, system, ct });
+        return (Task<string>)askAsync.Invoke(null, new object[] { general, client, request, user, system, ct, turn });
+    }
+
+    static Type turnType, queueType;
+
+    static object Turn(bool interactive, bool overtaken)
+    {
+        object turn = Activator.CreateInstance(turnType);
+        turnType.GetField("Interactive").SetValue(turn, interactive);
+        if (overtaken) turnType.GetField("Overtaken").SetValue(turn, new Func<bool>(() => true));
+        return turn;
+    }
+
+    /// What the queue holds now - for checking nothing is left behind.
+    public static string QueueState() { return (string)queueType.GetMethod("State", Any).Invoke(null, null); }
+
+    /// Holds the only place with "A", lines up the script - "B:i" someone is
+    /// looking at it, "X:b" a Pre-translate batch, "S:skip" confirmed while it
+    /// waits; a repeated label is the same prompt asked again - then lets A
+    /// finish. Returns the order the requests ran in, and what each caller got.
+    public static string QueueOrder(string script)
+    {
+        object g = General("Ollama", "m", 1, "");
+        object client = Client("Ollama", "m", "");
+        var order = new List<string>();
+        object gate = new object();
+        var hold = new TaskCompletionSource<string>();
+
+        Task<string> first = Ask(g, client, () => { lock (gate) order.Add("A"); return hold.Task; },
+            "prompt A", "s", CancellationToken.None, Turn(true, false));
+
+        var tasks = new List<Task<string>>();
+        int asked = 0;
+        foreach (string item in script.Split(','))
+        {
+            string[] parts = item.Split(':');
+            string label = parts[0], kind = parts[1];
+            object turn = Turn(kind != "b", kind == "skip");
+
+            // "C:s" is a segment whose prompt differs every time it is asked -
+            // a newly confirmed row became one of its examples meanwhile.
+            string user = "prompt " + label;
+            if (kind == "s")
+            {
+                turnType.GetField("Segment").SetValue(turn, "segment " + label);
+                user += " #" + (asked++);
+            }
+
+            tasks.Add(Ask(g, client, () => { lock (gate) order.Add(label); return Task.FromResult("reply " + label); },
+                user, "s", CancellationToken.None, turn));
+        }
+
+        hold.SetResult("reply A");
+        first.Wait(5000);
+
+        var got = new List<string>();
+        foreach (var task in tasks)
+        {
+            try { task.Wait(5000); got.Add(task.Result); }
+            catch (Exception e) { got.Add(Describe(e).Split(':')[0]); }
+        }
+
+        lock (gate) return string.Join(",", order) + " | " + string.Join(",", got);
+    }
+
+    /// A request cancelled while it waits leaves the line and gives no place back.
+    public static string QueueCancelled()
+    {
+        object g = General("Ollama", "m", 1, "");
+        object client = Client("Ollama", "m", "");
+        var order = new List<string>();
+        object gate = new object();
+        var hold = new TaskCompletionSource<string>();
+        var cancel = new CancellationTokenSource();
+
+        Task<string> first = Ask(g, client, () => { lock (gate) order.Add("A"); return hold.Task; },
+            "prompt A2", "s", CancellationToken.None, Turn(true, false));
+        Task<string> b = Ask(g, client, () => { lock (gate) order.Add("B"); return Task.FromResult("reply B"); },
+            "prompt B2", "s", cancel.Token, Turn(true, false));
+        cancel.Cancel();
+        Task<string> c = Ask(g, client, () => { lock (gate) order.Add("C"); return Task.FromResult("reply C"); },
+            "prompt C2", "s", CancellationToken.None, Turn(true, false));
+
+        hold.SetResult("reply A");
+        first.Wait(5000);
+        string bOutcome;
+        try { b.Wait(5000); bOutcome = b.Result; } catch (Exception e) { bOutcome = Describe(e).Split(':')[0]; }
+        c.Wait(5000);
+        lock (gate) return string.Join(",", order) + " | B: " + bOutcome;
     }
 
     static string Describe(Exception e)
@@ -127,7 +217,7 @@ public static class LocalHarness
                 await Task.Delay(150);
                 lock (gate) { now--; }
                 return "ok";
-            }, "u", "s", CancellationToken.None);
+            }, "u" + i, "s", CancellationToken.None);
         }
         Task.WaitAll(tasks);
         return max;
@@ -183,7 +273,27 @@ public static class LocalHarness
             usageType.GetField("RegularInputTokens").SetValue(usage, regular);
             usageType.GetField("CacheReadTokens").SetValue(usage, cacheRead);
         }
-        try { ensureRead.Invoke(null, new object[] { usage, new string('x', sentChars), null }); return "accepted"; }
+        try { ensureRead.Invoke(null, new object[] { usage, new string('x', sentChars), null, model, window }); return "accepted"; }
+        catch (Exception e) { return Describe(e); }
+    }
+
+    static string model;
+    static int? window;
+
+    /// The same, for a model whose own window is known.
+    public static string JudgeFor(int regular, int sentChars, string modelName, int modelWindow)
+    {
+        model = modelName; window = modelWindow;
+        try { return Judge(regular, 0, sentChars); }
+        finally { model = null; window = null; }
+    }
+
+    /// What the check before sending says about a prompt this long for a model this size.
+    public static string BeforeSending(int sentChars, string modelName, int modelWindow)
+    {
+        MethodInfo refuse = askAsync.DeclaringType.GetMethod("RefuseIfTooLarge", Any);
+        int? w = modelWindow > 0 ? (int?)modelWindow : null;
+        try { refuse.Invoke(null, new object[] { modelName, w, new string('x', sentChars), null }); return "sent"; }
         catch (Exception e) { return Describe(e); }
     }
 
@@ -286,6 +396,28 @@ Check ($m -eq 4) "a cloud provider is not queued here (saw $m)"
 Check ([LocalHarness]::FailureFreesTheQueue($true)) "a request that throws at once frees its place"
 Check ([LocalHarness]::FailureFreesTheQueue($false)) "a request that fails later frees its place"
 
+# ---- 4a. the order of the queue ------------------------------------------------
+# memoQ asks for the segment the translator lands on and then fetches the rows
+# after it by itself (plugin log, 2026-10-13), so the order it asks in is the
+# translator's own. Newest-first, the first version, served memoQ's look-ahead
+# rows before the segment the translator was waiting on.
+$o = [LocalHarness]::QueueOrder('B:i,C:i,D:i')
+Check ($o -like 'A,B,C,D |*') "segments go in the order memoQ asked for them ($o)"
+$o = [LocalHarness]::QueueOrder('X:b,Y:i,Z:b')
+Check ($o -like 'A,Y,X,Z |*') "a segment being looked at goes before Pre-translate, which keeps its order ($o)"
+$o = [LocalHarness]::QueueOrder('B:i,C:i,C:i')
+Check ($o -eq 'A,C,B | reply B,reply C,reply C') "a segment asked for again moves to the front, is sent once, and both askers get the answer ($o)"
+$o = [LocalHarness]::QueueOrder('B:i,C:i,D:i,D:i,C:i')
+Check ($o -like 'A,C,D,B |*') "the one asked for again most recently goes first of all ($o)"
+$o = [LocalHarness]::QueueOrder('C:s,D:i,C:s')
+Check ($o -eq 'A,C,D | reply C,reply D,reply C') "the same segment with a changed prompt is still one request ($o)"
+$o = [LocalHarness]::QueueOrder('S:skip,C:i')
+Check ($o -eq 'A,C | OvertakenException,reply C') "a segment confirmed while it waited is not sent, and says so ($o)"
+$o = [LocalHarness]::QueueCancelled()
+Check ($o -eq 'A,C | B: TaskCanceledException') "a request given up while it waits leaves the line ($o)"
+$s = [LocalHarness]::QueueState()
+Check ($s -eq 'waiting 0, running 0, flights 0') "and nothing is left behind in the queue ($s)"
+
 # ---- 5. how a failure reaches memoQ -----------------------------------------
 Write-Host "-- failures"
 $o = [LocalHarness]::Outcome('Ollama', 'timeout')
@@ -312,6 +444,30 @@ Check ([LocalHarness]::Judge(3000, 10000, 100000) -eq 'accepted') "cached tokens
 Check ([LocalHarness]::Judge(-1, 0, 100000) -eq 'accepted') "no count from the server is no judgement"
 Check ([LocalHarness]::Judge(0, 0, 100000) -eq 'accepted') "a count of zero is no count"
 Check ([LocalHarness]::Judge(100, 0, 4000) -eq 'accepted') "a prompt below 1,500 tokens is not judged"
+
+# A model whose own window is smaller than the prompt: no setting helps, and
+# the message used to send the translator to one (aya-expanse:8b, 2026-10-13).
+$o = [LocalHarness]::JudgeFor(4099, 100000, 'aya-expanse:8b', 8192)
+Check ($o -like '*aya-expanse:8b can hold at most 8,192 tokens*no setting raises it*memory bank*') "a cut by the model's own limit says so ($o)"
+Check ($o -notlike '*Raise the server*') "and does not send the translator to a setting"
+$o = [LocalHarness]::JudgeFor(2051, 100000, 'qwen2.5:7b', 32768)
+Check ($o -like '*Raise the server*at least 32,768 tokens*') "a model that holds more still gets the setting ($o)"
+$o = [LocalHarness]::JudgeFor(2051, 100000, 'm', 30000)
+Check ($o -like '*at least 30,000 tokens*') "and never a size larger than the model holds ($o)"
+
+# Before sending: a prompt that cannot fit is refused at once, not after the
+# five minutes it took Ollama to read the part it kept.
+$o = [LocalHarness]::BeforeSending(100000, 'aya-expanse:8b', 8192)
+Check ($o -like 'ContextTooSmallException:*Not sent: aya-expanse:8b can hold at most 8,192 tokens*about 25,000*') "a 25,000-token prompt is not sent to an 8,192-token model ($o)"
+Check ([LocalHarness]::BeforeSending(40000, 'm', 8192) -eq 'sent') "10,000 tokens to 8,192 goes: the estimate is too rough to refuse on"
+Check ([LocalHarness]::BeforeSending(100000, 'm', 0) -eq 'sent') "no window known, no judgement"
+Check ([LocalHarness]::BeforeSending(4000, 'm', 512) -eq 'sent') "a prompt below 1,500 tokens is not judged"
+
+$windowIn = $plugin.GetType('Supervertaler.MemoQ.Core.LocalServer').GetMethod('WindowIn', $Static)
+$show = '{"license":"x","parameters":"num_ctx 4096","details":{"family":"command-r"},"model_info":{"general.architecture":"command-r","command-r.context_length":8192,"command-r.embedding_length":4096},"capabilities":["completion"]}'
+Check ($windowIn.Invoke($null, @($show)) -eq 8192) "the window is read from Ollama's description of the model"
+Check ($null -eq $windowIn.Invoke($null, @('{"details":{}}'))) "and a description without it gives none"
+Check ($null -eq $windowIn.Invoke($null, @('{"error":"model not found"}'))) "nor does an error"
 
 # ---- 7. Ollama's cloud ---------------------------------------------------------
 # Allowed, and said. The name is what a dialog has; a request asks Ollama's model
@@ -374,17 +530,17 @@ $log = @(
 $reading = $parse.Invoke($null, @($log))
 Check ($reading.Total -eq 13903 -and $reading.Done -eq 10240 -and [math]::Abs($reading.Rate - 19.42) -lt 0.01 -and -not $reading.Writing) `
     "the log reads as 10,240 of 13,903 tokens at 19.42 a second"
-$text = $describe.Invoke($null, @('Ollama', 'qwen2.5:7b', [TimeSpan]::FromSeconds(527), 1, $reading))
+$text = $describe.Invoke($null, @('Ollama', 'qwen2.5:7b', [TimeSpan]::FromSeconds(527), 1, $reading, $null, $null))
 Check ($text -like '*waiting for Ollama (qwen2.5:7b)*8:47*' -and $text -like '*Reading the instructions: 73% done (10,240 of 13,903 tokens)*about 4 minutes left*') "and the notice says so: $(($text -split "`n")[0..1] -join ' / ')"
 Check ($text -like "*The first translation is the slow one*") "and why, in a translator's words"
 Check ($text -notmatch '\brequest') "with no 'request' in it"
 
 $done = $parse.Invoke($null, @($log + "`nslot print_timing: id  0 | task 9 | prompt eval time =  799400.48 ms / 13900 tokens (   57.51 ms per token,    17.39 tokens per second)"))
 Check ($done.Writing) "a finished prompt is read as writing the answer"
-$writing = $describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(800), 3, $done))
+$writing = $describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(800), 3, $done, $null, $null))
 Check ($writing -like '*Instructions read (13,903 tokens); now writing the translation.*2 more translations are waiting their turn.*') "which the notice says, with the queue behind it"
 Check ($writing -notlike '*slow one*') "and no longer explains a slowness that is over"
-Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(30), 2, $reading)) -like '*1 more translation is waiting its turn.*') "one waiting reads as one"
+Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(30), 2, $reading, $null, $null)) -like '*1 more translation is waiting its turn.*') "one waiting reads as one"
 
 # The second request of a job: most of the prompt is in Ollama's cache already.
 $warm = $parse.Invoke($null, @((@(
@@ -392,9 +548,45 @@ $warm = $parse.Invoke($null, @((@(
     'slot   operator(): id  0 | task 15 | cached n_tokens = 13312, memory_seq_rm [13312, end)'
 ) -join "`n")))
 Check ($warm.Done -eq 13312 -and $warm.Total -eq 13933) "tokens Ollama had cached count as read (13,312 of 13,933)"
-Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(9), 1, $warm)) -like '*Instructions read (13,933 tokens); now writing the translation.*') "so a warm request goes straight to writing, not 0%"
+Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(9), 1, $warm, $null, $null)) -like '*Instructions read (13,933 tokens); now writing the translation.*') "so a warm request goes straight to writing, not 0%"
 
-$quiet = $describe.Invoke($null, @('OpenAI-compatible', 'local-model', [TimeSpan]::FromSeconds(75), 1, $null))
+# The segment the model is on, with its own clock; and an answer that came
+# after memoQ had probably stopped waiting for it.
+$label = $progress.GetMethod('SegmentLabel', $Static).Invoke($null, @("[0002] Conventional bicycle lamps are  switched on and off by hand."))
+Check ($label -like '?`[0002] Conventional bicycle lamps are??' -and $label.Length -le 44) "a segment is quoted by its first words, cut between words ($label)"
+Check ($progress.GetMethod('SegmentLabel', $Static).Invoke($null, @('Claims')) -like '?Claims?') "a short one whole"
+Check ($null -eq $progress.GetMethod('SegmentLabel', $Static).Invoke($null, @('  '))) "an empty one not at all"
+Check ($progress.GetMethod('BatchLabel', $Static).Invoke($null, @(10)) -eq '10 segments for Pre-translate') "a batch by its size"
+
+$on = $describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(84), 2, $reading, $label, $null))
+$lines = $on -split "`r?`n"
+Check ($lines[0] -eq 'Supervertaler is waiting for Ollama (m)') "the first line names the server, with no clock ($($lines[0]))"
+Check ($lines[1] -like 'Translating ?`[0002] Conventional*? * 1:24') "the second names the segment, with its own clock ($($lines[1]))"
+Check ($on -like '*1 more translation is waiting its turn.*') "and the queue behind it"
+
+$ready = $describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::Zero, 0, $null, $null, $label))
+Check ($ready -like "Supervertaler: translation ready for ?``[0002] Conventional*?.*click another segment and then back.") "an answer memoQ stopped waiting for: ready, and how to see it ($ready)"
+$both = $describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::FromSeconds(5), 1, $null, '"next"', $label))
+Check ($both -like '*Ready: ?`[0002]*click another segment and then back.*Translating "next"*') "said above the segment that is on now"
+Check ($describe.Invoke($null, @('Ollama', 'm', [TimeSpan]::Zero, 0, $null, $null, $null)) -eq '') "nothing waiting and nothing ready says nothing"
+
+# When "ready" is said: someone was looking, and memoQ asked long enough ago.
+$readyField = $progress.GetField('_ready', [Reflection.BindingFlags]'NonPublic,Static')
+$working = $progress.GetMethod('Working', $Static)
+function ReadyAfter($minutes, $interactive) {
+    $readyField.SetValue($null, $null)
+    $w = $working.Invoke($null, @('"seg"'))
+    [void]$w.GetType().GetMethod('Answered').Invoke($w, @($interactive, [DateTime]::UtcNow.AddMinutes(-$minutes)))
+    ([IDisposable]$w).Dispose()
+    $r = $readyField.GetValue($null)
+    $readyField.SetValue($null, $null)
+    return $r
+}
+Check ((ReadyAfter 4 $true) -eq '"seg"') "an answer four minutes after memoQ asked is announced"
+Check ($null -eq (ReadyAfter 1 $true)) "one after a minute is not: memoQ shows it itself"
+Check ($null -eq (ReadyAfter 10 $false)) "nor is a Pre-translate batch"
+
+$quiet = $describe.Invoke($null, @('OpenAI-compatible', 'local-model', [TimeSpan]::FromSeconds(75), 1, $null, $null, $null))
 Check ($quiet -like '*waiting for OpenAI-compatible (local-model)*1:15*' -and $quiet -notlike '*Reading the instructions*') "with no log to read, it says how long, and no more"
 Check ($quiet -like '*the model reads the instructions once*') "and names no server it cannot see"
 Check ($null -eq $parse.Invoke($null, @('[GIN] 2026/10/13 - 10:47:52 | 200 | 13m22s | POST "/api/chat"'))) "a log it cannot read gives no progress rather than a wrong one"
@@ -606,6 +798,30 @@ foreach ($d in $dialogs) {
     finally { $form.Dispose() }
 }
 
+# Keep the model loaded: Ollama's own OLLAMA_KEEP_ALIVE, for this Windows
+# account, switched from the editor's settings. Ollama unloads after five idle
+# minutes, and on 2026-10-13 a 34-minute pause cost a full re-read.
+$keep = $editor.GetType('Supervertaler.PromptEditor.OllamaKeepAlive')
+$isForever = $keep.GetMethod('IsForever', $Static)
+foreach ($c in @(@('-1', $true), @('-1m', $true), @(' -24h ', $true), @('30m', $false), @('0', $false), @('', $false), @($null, $false))) {
+    Check ($isForever.Invoke($null, @($c[0])) -eq $c[1]) "OLLAMA_KEEP_ALIVE '$($c[0])' is $(if ($c[1]) {''} else {'not '})forever"
+}
+$realBefore = [Environment]::GetEnvironmentVariable('OLLAMA_KEEP_ALIVE', 'User')
+$changed = $keep.GetMethod('Set', $Static).Invoke($null, @(-not $isForever.Invoke($null, @($realBefore))))
+Check (-not $changed -and [Environment]::GetEnvironmentVariable('OLLAMA_KEEP_ALIVE', 'User') -eq $realBefore) "a test run never changes the real setting (still '$realBefore')"
+
+$form = [Activator]::CreateInstance($editor.GetType('Supervertaler.PromptEditor.SettingsForm'), $Ctor, $null, @(), $null)
+try {
+    $box = Field $form '_keepLoaded'
+    $provider = Field $form '_provider'
+    $provider.SelectedItem = 'Ollama'
+    Check ($box.Enabled) "the editor offers 'keep the model loaded' under Ollama"
+    $provider.SelectedItem = 'Anthropic'
+    Check (-not $box.Enabled) "and greys it out for a cloud provider"
+    Check ($box.Checked -eq $isForever.Invoke($null, @($realBefore))) "ticked exactly when Ollama is already set to keep it ('$realBefore')"
+}
+finally { $form.Dispose() }
+
 # ---- 12. a real Ollama, when there is one ------------------------------------
 Write-Host "-- live Ollama"
 # The dialogs left a WinForms context on this thread; see Live() for why that hangs.
@@ -647,6 +863,21 @@ else {
         Write-Host "INFO the server read the whole long prompt (${secs}s); its context window is large enough here"
         Check ($o -like 'reply: *') "and the reply came back ($o)"
     }
+}
+
+# The model's own window, asked of Ollama itself. Refused before anything is
+# sent, so no model is loaded and it takes no time.
+if ($null -ne $tags -and ($tags.models | Where-Object { $_.name -eq 'aya-expanse:8b' })) {
+    $claim = 'Claim {0}: the fastening element according to claim {1}, wherein the retaining ring engages the groove at a depth of {0}.{1} millimetres. '
+    $filler = -join (1..700 | ForEach-Object { $claim -f $_, ($_ % 7 + 1) })
+    $started = Get-Date
+    $o = [LocalHarness]::Live('', 'aya-expanse:8b', "Translate from English into Dutch.`n`n$filler", 'The ring is fastened.')
+    $secs = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
+    Check ($o -like 'ContextTooSmallException:*Not sent: aya-expanse:8b can hold at most 8,192 tokens*') "aya-expanse:8b is asked its window and refuses a 25,000-token prompt (${secs}s): $o"
+    Check ($secs -lt 5) "at once, not after reading it"
+}
+else {
+    Write-Host "SKIP aya-expanse:8b is not installed; the model-window check runs against it"
 }
 
 Write-Host

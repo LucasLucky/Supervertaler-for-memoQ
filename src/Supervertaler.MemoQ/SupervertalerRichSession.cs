@@ -213,13 +213,24 @@ namespace Supervertaler.MemoQ
                 context.KbContextBlock(),
                 structure.Mode, structure.MarkerFor(bundle.Source.PlainText));
 
+            // Its place in the queue for a server of the translator's own:
+            // someone is looking at it, and it is not sent if the translator
+            // confirms the segment while it waits (LocalQueue). Made before the
+            // cache is asked, because for such a server it is also the key.
+            var turn = TurnFor(context, bundle.Source.PlainText, taggedSource);
+
             // memoQ asks for the same segment more than once — twice within two
             // seconds merely for landing on it — so an identical prompt is served
             // from memory rather than paid for again. Keyed on the whole prompt,
             // so a segment whose terminology or recalled context has changed still
-            // gets a fresh answer.
-            var cacheKey = TranslationCache.Key(
-                general.Provider, general.Model, general.Endpoint, prompt.System, prompt.User);
+            // gets a fresh answer. A server of the translator's own is keyed on
+            // the segment instead (LocalQueue.Identity): its prompt changes each
+            // time a confirmed row becomes one of its examples, and on a computer
+            // without a graphics card a second answer to the same segment costs
+            // minutes, not cents.
+            var cacheKey = LlmProviders.TakesEndpoint(general.Provider)
+                ? LocalQueue.Identity(general, prompt.User, prompt.System, turn)
+                : TranslationCache.Key(general.Provider, general.Model, general.Endpoint, prompt.System, prompt.User);
 
             if (TranslationCache.TryGet(cacheKey, out var cached))
             {
@@ -238,7 +249,7 @@ namespace Supervertaler.MemoQ
             // rather than the ~250-line stub this replaces.
             using (var client = LlmProviders.CreateClient(general.Provider, general.Model, apiKey, general.Endpoint))
             {
-                var reply = await AskAsync(general, client, prompt.User, prompt.System, structure, cancellationToken)
+                var reply = await AskAsync(general, client, prompt.User, prompt.System, structure, cancellationToken, turn)
                     .ConfigureAwait(false);
 
                 // Checked before anything else happens to it (see ReplyCheck). A
@@ -254,7 +265,7 @@ namespace Supervertaler.MemoQ
 
                     var again = await AskAsync(general, client,
                             OutputContract.Reminder + Environment.NewLine + Environment.NewLine + prompt.User,
-                            prompt.System, structure, cancellationToken)
+                            prompt.System, structure, cancellationToken, turn)
                         .ConfigureAwait(false);
 
                     var second = ReplyCheck.Problem(taggedSource, again);
@@ -328,6 +339,32 @@ namespace Supervertaler.MemoQ
             }
         }
         /// <summary>
+        /// A segment's place in the queue for a server of the translator's own.
+        /// Someone is looking at it - memoQ asks as the translator lands on a row
+        /// - and it no longer needs sending once the translator has confirmed it.
+        /// That is known only when Supervertaler is memoQ's self-learning MT
+        /// (DocumentMemory); otherwise the check never fires. A segment confirmed
+        /// before it was asked for is not "overtaken": the translator came back
+        /// to it and wants a suggestion.
+        /// </summary>
+        private static LocalQueue.Turn TurnFor(EngineContext context, string plainSource, string taggedSource)
+        {
+            var key = context.MemoryKey;
+            var before = DocumentMemory.TargetFor(key, plainSource);
+            return new LocalQueue.Turn
+            {
+                Interactive = true,
+                Segment = key + "\n" + taggedSource,
+                Label = LocalProgress.SegmentLabel(plainSource),
+                Overtaken = () =>
+                {
+                    var now = DocumentMemory.TargetFor(key, plainSource);
+                    return now != null && !string.Equals(now, before, StringComparison.Ordinal);
+                }
+            };
+        }
+
+        /// <summary>
         /// One request, with the list marker stripped when markers were sent.
         /// Stripped before the reply is checked or cached, so a served-from-cache
         /// answer is as clean as a fresh one.
@@ -338,7 +375,8 @@ namespace Supervertaler.MemoQ
             string user,
             string system,
             StructureMarkers.Plan structure,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            LocalQueue.Turn turn)
         {
             // Cached, like the batch path. This was the one request that did not
             // ask, and it is the one memoQ makes most: every row the translator
@@ -351,7 +389,7 @@ namespace Supervertaler.MemoQ
             var raw = await LocalServer.AskAsync(general, client,
                     () => client.SendPromptAsync(user, system, cancellationToken: cancellationToken,
                         enablePromptCaching: true),
-                    user, system, cancellationToken)
+                    user, system, cancellationToken, turn)
                 .ConfigureAwait(false);
 
             // Said on every request, as the batch path already does: the cache

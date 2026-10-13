@@ -555,6 +555,52 @@ after the last request, and the next segment then re-reads everything.
   comes from `LocalServer.ProviderLabelAsync`, which asks `/api/tags` and so
   catches a renamed cloud model too.
 
+**The queue** (`LocalQueue`, used by `LocalServer.AskAsync`), built from the
+plugin log on 2026-10-13. memoQ asks for the segment the translator lands on,
+then **fetches the following rows ahead by itself** (three rows exactly 10.2 s
+apart while the translator sat still, and the next row the moment an answer
+arrived), and asks again for one it is still waiting on. A first version served
+the newest request first, believing memoQ did not fetch ahead; it served
+memoQ's look-ahead rows before the segment the translator was waiting on.
+- Interactive requests go before Pre-translate batches, and within each the
+  first asked goes first. That is the translator's order, and document order.
+- A request for a segment already waiting or running is joined: a repeat ask
+  moves a waiting one to the very front (`_front` counts down below every
+  arrival stamp), and either way it is sent once. **A segment is the same
+  segment even when its prompt changed** - a newly confirmed row becoming one
+  of its examples got two segments translated twice. So `Turn.Segment`
+  (document key + tagged source) is the identity, and for a local provider it
+  is also the `TranslationCache` key: a segment answered once is served from
+  the cache even after its examples change.
+- A segment confirmed while it waited is skipped (`OvertakenException`). This
+  works only when Supervertaler is memoQ's self-learning MT and so receives
+  confirmations (`DocumentMemory.TargetFor`).
+- One lock covers the waiting list, the running count and the flights. A place
+  is handed over by completing the waiter's task, and every granted place is
+  returned in a `finally`. `local-models-test` checks the order, the join, the
+  skip and cancellation, and that the queue is empty afterwards.
+- Anything awaited before a request has its place breaks the order: a request
+  memoQ made later can enter the line first. So the model-window lookup below
+  happens after `EnterAsync`, like the overtaken check.
+
+**A model's own window.** Ollama loads a model with the smaller of its own
+context length and the Context length setting (qwen2.5:7b 32,768 and
+aya-expanse:8b 8,192 under one setting of 32,768). It cuts a prompt only when
+it exceeds the whole window, and then keeps about half (`llama_server.go`,
+read 2026-10-13: limit `numCtx - (numCtx - numKeep)/2`). `LocalServer` asks
+`/api/show` for the model's `<arch>.context_length` on every request (about
+0.1 s) and refuses before sending when core's estimate exceeds 1.5 times it;
+nearer the line `EnsureWholePromptRead` judges by the server's count, and its
+message says "no setting raises it" instead of "raise the context length" when
+the model is the limit. With the shared memory bank Michael's prompt was
+16,446 tokens; without it, 927.
+
+**The notice names the segment** (`Turn.Label`, `LocalProgress.Working`) with
+its own clock, and says "translation ready ... click another segment and then
+back" when an interactive answer arrives more than 3 minutes after memoQ asked:
+memoQ stops waiting for a slow lookup and never shows a late answer, which then
+sits in the cache.
+
 **Parallel requests** is two values now: `parallel` for the cloud providers and
 `parallel.local` (default 1) for Ollama and OpenAI-compatible. The dialogs show
 whichever applies, and `EngineContext.General` picks it by provider.

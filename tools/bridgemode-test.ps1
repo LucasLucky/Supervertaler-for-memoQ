@@ -78,6 +78,10 @@ $generalT.GetProperty('BridgeMode').SetValue($general, $true)
 # run-harness.ps1 snapshots and restores that file, so writing to it is safe.
 $sharedT = $main.GetType('Supervertaler.MemoQ.Core.SharedSettings')
 $sharedT.GetProperty('BridgeMode', [Reflection.BindingFlags]'NonPublic,Public,Static').SetValue($null, $true)
+# A cloud provider, which has no key under the harness, so check 1 sees the
+# model tried and refused. Not inherited: the file is the user's own, and when
+# it said Ollama the lookup went to the local model and came back translated.
+$sharedT.GetProperty('Provider', [Reflection.BindingFlags]'NonPublic,Public,Static').SetValue($null, 'Anthropic')
 $settings = $settingsT.GetMethod('Create').Invoke($null, @($general, [Activator]::CreateInstance($secureT)))
 
 $engineT = $main.GetType('Supervertaler.MemoQ.SupervertalerMTEngine')

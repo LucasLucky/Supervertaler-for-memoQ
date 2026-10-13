@@ -6,6 +6,18 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Added
+
+- **Keep the Ollama model loaded while Ollama runs.** A new box in the editor's *Translation settings*, under the endpoint. Ollama normally unloads a model five minutes after its last use, and the next segment then reads all of Supervertaler's instructions again, which can take ten minutes or more on a computer without a graphics card. Ticked, Ollama keeps the model loaded until you quit it. It sets Ollama's own `OLLAMA_KEEP_ALIVE` for your Windows account, so it applies to every program that uses Ollama, and the model holds its memory meanwhile. Restart Ollama after changing it.
+
+### Changed
+
+- **With a local model, segments are translated in the order you reach them, and each only once.** A local model on a computer without a graphics card answers one segment at a time, often a minute or more each, so segments wait their turn. memoQ asks for the segment you land on and then fetches the next few itself, so they now go first come, first served, and a segment you are looking at goes ahead of a running Pre-translate. If you go back to a segment that is still waiting, it moves to the front. A segment is translated once even when its prompt changes while it waits (a segment you confirmed meanwhile becoming one of its examples), and a translation already made is reused rather than made again. A segment you confirm while it waits is not sent at all, when Supervertaler is also your self-learning MT in memoQ.
+- **The waiting notice names the segment, and says when a slow answer is ready.** It quotes the first words of the segment the model is working on, with that segment's own clock. memoQ stops waiting for a slow answer after a few minutes and then does not show it; when that is likely, the notice says the translation is ready and that clicking another segment and back shows it.
+- **A prompt too large for the model is refused at once.** Some models can hold only a few thousand tokens whatever Ollama's settings say: aya-expanse:8b holds 8,192, and a prompt with the shared memory bank was twice that. Ollama silently cut it and read the rest for five minutes before Supervertaler noticed and refused the answer. Supervertaler now asks Ollama how much the model holds and refuses such a prompt before sending it, saying that no setting raises the model's limit and that switching off the memory bank usually makes the prompt fit. The advice to raise Ollama's context length is now given only where that would help.
+
 ## [0.1.14] – 2026-10-13
 
 ### Added

@@ -35,6 +35,15 @@ namespace Supervertaler.MemoQ.Core
     /// programs. It appears after <see cref="Delay"/>, so a quick answer
     /// never shows it, and closes when the last request is answered. A click
     /// hides it until the next wait.</para>
+    ///
+    /// <para>It names the segment the model is on, with that segment's own
+    /// clock: with memoQ fetching rows ahead, a clock that had run since the
+    /// first segment - eighteen minutes, on 2026-10-13 - said nothing about the
+    /// one the translator was looking at. And it says when an answer
+    /// arrives that memoQ has probably stopped showing: memoQ gives up on a
+    /// slow lookup, an answer after that never reaches the grid, and the
+    /// translator has no way to know it is there - in the cache, a click away.
+    /// </para>
     /// </summary>
     internal static class LocalProgress
     {
@@ -42,6 +51,20 @@ namespace Supervertaler.MemoQ.Core
 
         /// <summary>How many tokens Ollama reads between two progress lines in its log.</summary>
         private const int ChunkTokens = 1024;
+
+        /// <summary>
+        /// After this long, memoQ has probably stopped waiting for the answer and
+        /// will not show it until the translator lands on the segment again.
+        /// Seen 2026-10-13: answers after several minutes never reached the grid,
+        /// and clicking away and back showed them at once, from the cache.
+        /// </summary>
+        private static readonly TimeSpan ReadyAfter = TimeSpan.FromMinutes(3);
+
+        /// <summary>How long "ready" is shown, counted only while memoQ is in front.</summary>
+        private const int ReadySeconds = 20;
+
+        /// <summary>How much of a segment the notice quotes.</summary>
+        private const int LabelChars = 40;
 
         private static readonly object Lock = new object();
         private static int _waiting;
@@ -52,6 +75,14 @@ namespace Supervertaler.MemoQ.Core
         private static long _logFrom;
         private static object _notice;
         private static bool _dismissed;
+
+        /// <summary>The requests the server is working on now, oldest first.</summary>
+        private static readonly System.Collections.Generic.List<Work> Running =
+            new System.Collections.Generic.List<Work>();
+
+        /// <summary>A segment whose answer came after memoQ stopped waiting, or null.</summary>
+        private static string _ready;
+        private static int _readyShown;
 
         /// <summary>
         /// A request has started waiting on a local server. Dispose the result
@@ -88,6 +119,69 @@ namespace Supervertaler.MemoQ.Core
             return new Ending();
         }
 
+        /// <summary>
+        /// The server has started on a request - it has its place and is being
+        /// sent. Dispose it however the request ends; call
+        /// <see cref="Work.Answered"/> first when it was answered.
+        /// </summary>
+        public static Work Working(string label)
+        {
+            var work = new Work(label);
+            lock (Lock) Running.Add(work);
+            return work;
+        }
+
+        internal sealed class Work : IDisposable
+        {
+            internal readonly string Label;
+            internal readonly DateTime Since = DateTime.UtcNow;
+            private int _done;
+
+            internal Work(string label) { Label = label; }
+
+            /// <summary>
+            /// The answer is in. When someone was looking at a segment and memoQ
+            /// asked for it long enough ago that it has probably stopped waiting,
+            /// the notice says the translation is ready and how to see it.
+            /// </summary>
+            public void Answered(bool interactive, DateTime asked)
+            {
+                if (Label == null || !interactive || DateTime.UtcNow - asked < ReadyAfter) return;
+                lock (Lock)
+                {
+                    _ready = Label;
+                    _readyShown = 0;
+                    // News, so it is shown even after a click hid the waiting.
+                    _dismissed = false;
+                }
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _done, 1) == 1) return;
+                lock (Lock) Running.Remove(this);
+            }
+        }
+
+        /// <summary>What the notice calls a segment: its first words, quoted.</summary>
+        internal static string SegmentLabel(string plainSource)
+        {
+            var text = System.Text.RegularExpressions.Regex.Replace(plainSource ?? string.Empty, @"\s+", " ").Trim();
+            if (text.Length == 0) return null;
+
+            if (text.Length > LabelChars)
+            {
+                var cut = text.LastIndexOf(' ', LabelChars);
+                text = text.Substring(0, cut > LabelChars / 2 ? cut : LabelChars).TrimEnd() + "\u2026";
+            }
+
+            return "\u201C" + text + "\u201D";
+        }
+
+        /// <summary>What the notice calls a Pre-translate batch.</summary>
+        internal static string BatchLabel(int segments) =>
+            segments == 1 ? "1 segment for Pre-translate" : segments + " segments for Pre-translate";
+
         private sealed class Ending : IDisposable
         {
             private int _done;
@@ -109,16 +203,23 @@ namespace Supervertaler.MemoQ.Core
         {
             lock (Lock)
             {
-                if (_waiting == 0)
+                if (_waiting == 0 && _ready == null)
                 {
                     Forget(token);
                     return null;
                 }
 
+                // The oldest request the server is on: with one place, the only one.
+                var work = Running.Count > 0 ? Running[0] : null;
+                var now = DateTime.UtcNow;
+
                 return new Snapshot
                 {
                     Waiting = _waiting,
-                    Elapsed = DateTime.UtcNow - _since,
+                    Elapsed = now - _since,
+                    Label = work?.Label,
+                    Clock = work?.Label != null ? now - work.Since : now - _since,
+                    Ready = _ready,
                     Provider = _provider,
                     Model = _model,
                     LogPath = _logPath,
@@ -140,13 +241,29 @@ namespace Supervertaler.MemoQ.Core
 
         private static void Dismiss()
         {
-            lock (Lock) { _dismissed = true; }
+            lock (Lock)
+            {
+                _dismissed = true;
+                _ready = null;
+            }
+        }
+
+        /// <summary>One more second of "ready" seen; after <see cref="ReadySeconds"/> it goes.</summary>
+        private static void ReadySeen()
+        {
+            lock (Lock)
+            {
+                if (_ready != null && ++_readyShown >= ReadySeconds) _ready = null;
+            }
         }
 
         private sealed class Snapshot
         {
             public int Waiting;
             public TimeSpan Elapsed;
+            public string Label;
+            public TimeSpan Clock;
+            public string Ready;
             public string Provider;
             public string Model;
             public string LogPath;
@@ -293,13 +410,44 @@ namespace Supervertaler.MemoQ.Core
 
         // -- the words ------------------------------------------------------
 
-        /// <summary>What the notice says. Separate from the window so it can be checked.</summary>
-        internal static string Describe(string provider, string model, TimeSpan elapsed, int waiting, Reading reading)
+        private const string ReadyHint = "If memoQ isn't showing it, click another segment and then back.";
+
+        /// <summary>
+        /// What the notice says. Separate from the window so it can be checked.
+        /// </summary>
+        /// <param name="elapsed">
+        /// The clock: how long the server has been on <paramref name="label"/>,
+        /// or how long the wait has lasted when there is no label.
+        /// </param>
+        /// <param name="label">What the server is working on, or null.</param>
+        /// <param name="ready">A segment whose answer memoQ has probably stopped waiting for, or null.</param>
+        internal static string Describe(string provider, string model, TimeSpan elapsed, int waiting, Reading reading,
+            string label = null, string ready = null)
         {
             var text = new StringBuilder();
+
+            if (waiting <= 0)
+            {
+                return ready == null
+                    ? string.Empty
+                    : "Supervertaler: translation ready for " + ready + "." + Environment.NewLine + ReadyHint;
+            }
+
             text.Append("Supervertaler is waiting for ").Append(provider);
             if (!string.IsNullOrWhiteSpace(model)) text.Append(" (").Append(model.Trim()).Append(')');
-            text.Append(" \u00B7 ").Append(Clock(elapsed));
+            if (label == null) text.Append(" \u00B7 ").Append(Clock(elapsed));
+
+            if (ready != null)
+            {
+                text.AppendLine();
+                text.Append("Ready: ").Append(ready).Append(". ").Append(ReadyHint);
+            }
+
+            if (label != null)
+            {
+                text.AppendLine();
+                text.Append("Translating ").Append(label).Append(" \u00B7 ").Append(Clock(elapsed));
+            }
 
             // In a translator's words. The token counts follow in brackets: worth
             // knowing - tokens are what models are priced and limited by - but
@@ -447,19 +595,22 @@ namespace Supervertaler.MemoQ.Core
                     return;
                 }
 
-                if (now.Elapsed < Delay || now.Dismissed || !MemoQInFront())
+                // "Ready" is news and shows at once; a wait shows after the delay.
+                var early = now.Ready == null && now.Elapsed < Delay;
+                if (early || now.Dismissed || !MemoQInFront())
                 {
                     if (Visible) Hide();
                     return;
                 }
 
-                var reading = Parse(ReadLog(now.LogPath, now.LogFrom));
-                _text.Text = Describe(now.Provider, now.Model, now.Elapsed, now.Waiting, reading);
+                var reading = now.Waiting > 0 ? Parse(ReadLog(now.LogPath, now.LogFrom)) : null;
+                _text.Text = Describe(now.Provider, now.Model, now.Clock, now.Waiting, reading, now.Label, now.Ready);
                 ClientSize = new Size(_text.PreferredWidth + Padding.Horizontal,
                     _text.PreferredHeight + Padding.Vertical);
                 PlaceInMemoQCorner();
 
                 if (!Visible) Show();
+                if (now.Ready != null) ReadySeen();
             }
 
             /// <summary>Bottom right of memoQ's window, above its status bar.</summary>

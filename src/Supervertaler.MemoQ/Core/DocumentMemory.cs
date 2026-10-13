@@ -135,6 +135,19 @@ namespace Supervertaler.MemoQ.Core
                 .ToList();
         }
 
+        /// <summary>
+        /// The confirmed translation of exactly this source in this document, or
+        /// null. Matched as <see cref="Record"/> stores it: plain text, trimmed.
+        /// </summary>
+        public static string TargetFor(string key, string plainSource)
+        {
+            var src = plainSource?.Trim();
+            if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(src)) return null;
+
+            lock (_lock)
+                return EnsureLoaded(key).FirstOrDefault(p => string.Equals(p.Source, src, StringComparison.Ordinal))?.Target;
+        }
+
         public static int CountFor(string key)
         {
             if (string.IsNullOrEmpty(key)) return 0;

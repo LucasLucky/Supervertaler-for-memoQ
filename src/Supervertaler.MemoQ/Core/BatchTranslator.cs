@@ -434,7 +434,9 @@ namespace Supervertaler.MemoQ.Core
                             () => client.SendPromptAsync(userPrompt, system,
                                 cancellationToken: cancellationToken,
                                 enablePromptCaching: true),
-                            userPrompt, system, cancellationToken)
+                            userPrompt, system, cancellationToken,
+                            // In document order, behind any segment someone is looking at.
+                            new LocalQueue.Turn { Interactive = false, Label = LocalProgress.BatchLabel(chunk.Count) })
                         .ConfigureAwait(false);
 
                     // Read before the client is disposed. This is the only way
