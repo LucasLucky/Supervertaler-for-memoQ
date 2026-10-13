@@ -94,6 +94,7 @@ Check ($aiAllowed -eq $true) 'under a harness the gate is open'
 
 $message = $licence.GetProperty('PausedMessage', $Static).GetValue($null)
 Check ($message -match 'trial') 'the paused message reads as the trial one when no licence is consulted'
+Check ($message -like '*buy a licence at supervertaler.com/buy*') "and says where to buy one ($message)"
 
 $start = $licence.GetMethod('Start', $Static)
 [void]$start.Invoke($null, [object[]]@($null))

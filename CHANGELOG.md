@@ -6,17 +6,23 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Changed
+
+- **"Buy a licence" goes straight to the checkout.** The link in the editor's *Help, Licence* window opened the pricing page, one click short of buying. And when the free trial ends, the message under memoQ's grid now says where to buy a licence – supervertaler.com/buy – as well as where to enter the key.
+
 ## [0.1.18] – 2026-10-13
 
 ### Changed
 
-- **The update offer's link shows only what changed since your version.** *See everything that has changed since version 0.1.12* now opens Supervertaler's own changelog page, [supervertaler.com/changelog/memoq](https://supervertaler.com/changelog/memoq/), showing just the releases after yours, newest first, with every release listed down the side.
+- **The "new version available" window now shows only what changed since your version.** *See everything that has changed since version 0.1.12* now opens Supervertaler's own changelog page, [supervertaler.com/changelog/memoq](https://supervertaler.com/changelog/memoq/), showing just the releases after yours, newest first, with every release listed down the side.
 
 ## [0.1.17] – 2026-10-13
 
 ### Changed
 
-- **The update offer links to the whole changelog.** Its *What's new* button opened only the newest release's notes, so anyone skipping versions never saw what changed in between. The offer now says *See everything that has changed since version 0.1.12* (with your own version), and the link opens this changelog, newest first. Enter still means *Download and install*.
+- **The "new version available" window links to the whole changelog.** Its *What's new* button opened only the newest release's notes, so anyone skipping versions never saw what changed in between. The offer now says *See everything that has changed since version 0.1.12* (with your own version), and the link opens this changelog, newest first. Enter still means *Download and install*.
 
 ## [0.1.16] – 2026-10-13
 

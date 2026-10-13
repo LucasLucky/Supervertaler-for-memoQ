@@ -82,7 +82,13 @@ namespace Supervertaler.PromptEditor
     /// </summary>
     internal sealed class LicenceDialog : Form
     {
-        private const string BuyUrl = "https://supervertaler.com/pricing/";
+        /// <summary>
+        /// Straight to the checkout, through the website's own /buy redirect rather
+        /// than the Lemon Squeezy address: the store's address then lives in one
+        /// place, which a website commit can change, and not in every copy of the
+        /// editor ever installed. It was /pricing/, one click short of buying.
+        /// </summary>
+        internal const string BuyUrl = "https://supervertaler.com/buy";
 
         private readonly TextBox _key;
 

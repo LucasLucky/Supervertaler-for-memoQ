@@ -57,6 +57,13 @@ namespace Supervertaler.MemoQ.Core
         /// has ended wants a key, and a key that has gone 30 days unconfirmed wants
         /// a connection, not a purchase.
         /// </summary>
+        /// <summary>
+        /// Where to buy, as the message under memoQ's grid gives it. Text, not a
+        /// link - memoQ shows an MT error as plain text - so the short form of the
+        /// website's /buy redirect, which leads to the checkout.
+        /// </summary>
+        internal const string BuyAddress = "supervertaler.com/buy";
+
         internal static string PausedMessage
         {
             get
@@ -84,8 +91,9 @@ namespace Supervertaler.MemoQ.Core
                       "editor and choose Help, Licence, Check now. Your termbases, prompts and " +
                       "memory banks are unaffected."
                     : "Supervertaler's free trial has ended on this computer, so AI translation is " +
-                      "paused. Open the Supervertaler editor and choose Help, Licence to enter a " +
-                      "licence key. Your termbases, prompts and memory banks are unaffected.";
+                      "paused. To go on using it, buy a licence at " + BuyAddress + ", then open the " +
+                      "Supervertaler editor and choose Help, Licence to enter the key. Your termbases, " +
+                      "prompts and memory banks are unaffected.";
             }
         }
 
