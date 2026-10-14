@@ -212,18 +212,24 @@ namespace Supervertaler.MemoQ.Settings
             _maxParallel.Minimum = 1; _maxParallel.Maximum = 16;
             Controls.Add(_maxParallel);
 
-            Controls.Add(new Label
+            // Two lines: it says what is kept apart and what to choose. Wrapped and
+            // then asked how tall it became, so the row below starts under it.
+            var parallelHint = new Label
             {
                 Text = ProviderText.ParallelHint,
                 Left = fieldX + 82, Top = y + 3, AutoSize = true,
+                MaximumSize = new Size(fieldW - 82, 0),
                 ForeColor = SystemColors.GrayText
-            });
-            y += rowH;
+            };
+            Controls.Add(parallelHint);
+            y += Math.Max(rowH, parallelHint.PreferredHeight + 10);
 
-            // Segments per request during Pre-translate. Matters beyond cost:
+            // Segments per batch during Pre-translate. Matters beyond cost:
             // prompts written for batch translation refer to segment numbers, and
-            // only get them when several segments travel together.
-            Caption("Segments per request", y);
+            // only get them when several segments travel together. Called
+            // "Segments per request" until 0.1.20, which did not fit the caption's
+            // 130 pixels in memoQ's font and showed as "Segments per".
+            Caption("Segments per batch", y);
             _batchSize.Left = fieldX; _batchSize.Top = y; _batchSize.Width = 70;
             _batchSize.Minimum = 1; _batchSize.Maximum = 100;
             Controls.Add(_batchSize);

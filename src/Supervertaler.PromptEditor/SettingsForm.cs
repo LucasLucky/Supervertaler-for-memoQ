@@ -226,12 +226,16 @@ namespace Supervertaler.PromptEditor
             _parallel.Minimum = 1; _parallel.Maximum = 16;
             Controls.Add(_parallel);
 
-            Controls.Add(new Label
+            // Two lines: it says what is kept apart and what to choose.
+            var parallelHint = new Label
             {
                 Text = ProviderText.ParallelHint,
-                Left = fieldX + 84, Top = y + 3, AutoSize = true, ForeColor = SystemColors.GrayText
-            });
-            y += rowH;
+                Left = fieldX + 84, Top = y + 3, AutoSize = true,
+                MaximumSize = new Size(fieldW - 84, 0),
+                ForeColor = SystemColors.GrayText
+            };
+            Controls.Add(parallelHint);
+            y += Math.Max(rowH, parallelHint.PreferredHeight + 10);
 
             Caption("Segments per batch", y);
             _batchSize.Left = fieldX; _batchSize.Top = y; _batchSize.Width = 70;

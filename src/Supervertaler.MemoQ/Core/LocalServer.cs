@@ -19,16 +19,17 @@ namespace Supervertaler.MemoQ.Core
     /// does not: requests queued here rather than at the server, and a check that
     /// the server read the whole prompt.
     ///
-    /// <para>Applies to Ollama and OpenAI-compatible only. Every call to a model
-    /// made inside memoQ's process goes through <see cref="AskAsync"/>, so a
-    /// provider added later cannot skip either half by accident.</para>
+    /// <para>Applies to Ollama and OpenAI-compatible only; a cloud provider's
+    /// request only waits for a place at <see cref="CloudGate"/>. Every call to a
+    /// model made inside memoQ's process goes through <see cref="AskAsync"/>, so
+    /// a provider added later cannot skip either half by accident.</para>
     /// </summary>
     internal static class LocalServer
     {
         /// <summary>
-        /// Sends one request, waiting first for a free place when the server is
-        /// the translator's own, and refuses an answer made from part of the
-        /// prompt.
+        /// Sends one request, waiting first for a free place - in the queue when
+        /// the server is the translator's own - and refuses an answer made from
+        /// part of the prompt.
         ///
         /// <para>The queue is here and not at the server because the timeout
         /// starts when the request is sent. memoQ calls the plugin from several
@@ -36,11 +37,11 @@ namespace Supervertaler.MemoQ.Core
         /// otherwise, so the fourth request of a Pre-translate used to spend three
         /// requests' worth of its own time limit waiting in Ollama's queue.</para>
         ///
-        /// <para>How many go at once is the Parallel requests setting, read for
-        /// every request, so a change in the settings applies to the next one.
-        /// memoQ itself reads that setting only when the MT settings resource is
-        /// created, which makes this the only place a change to it does anything
-        /// for an existing resource.</para>
+        /// <para>How many go at once is the Parallel requests setting - the cloud
+        /// value or the local one - read for every request, so a change in the
+        /// settings applies to the next one. memoQ itself reads that setting only
+        /// when the MT settings resource is created, which makes this the only
+        /// place a change to it does anything for an existing resource.</para>
         /// </summary>
         /// <param name="client">The client <paramref name="request"/> uses; its usage is read afterwards.</param>
         /// <param name="request">
@@ -63,7 +64,8 @@ namespace Supervertaler.MemoQ.Core
             LocalQueue.Turn turn = null)
         {
             if (!LlmProviders.TakesEndpoint(general.Provider))
-                return await request(cancellationToken).ConfigureAwait(false);
+                return await CloudGate.RunAsync(general.MaxParallelRequests, turn?.Interactive ?? true, request, cancellationToken)
+                    .ConfigureAwait(false);
 
             // Just stopped: memoQ is still sending what it had lined up.
             RefuseIfStopped();

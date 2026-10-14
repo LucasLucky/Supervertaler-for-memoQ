@@ -53,8 +53,14 @@ namespace Supervertaler.MemoQ.Settings
         /// <summary>A cloud model's verdict in the dropdown, where it is chosen.</summary>
         public const string CloudDescription = "runs on Ollama's servers - the text leaves this computer";
 
-        /// <summary>Beside Parallel requests.</summary>
-        public const string ParallelHint = "Cloud and local servers each keep their own.";
+        /// <summary>
+        /// Beside Parallel requests. Says what is kept apart and what to choose:
+        /// "Cloud and local servers each keep their own" said neither, and read to
+        /// a new user like a control that had been switched off.
+        /// </summary>
+        public const string ParallelHint =
+            "Saved separately for cloud providers and for local servers. 4 suits a cloud provider; "
+            + "1 suits a model on your own computer.";
 
         private static bool Is(string provider, string name) =>
             string.Equals(provider, name, StringComparison.OrdinalIgnoreCase);

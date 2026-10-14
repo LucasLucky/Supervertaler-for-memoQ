@@ -6,6 +6,14 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [0.1.20] – 2026-10-14
+
+### Fixed
+
+- **Parallel requests now works for Anthropic, OpenAI and Google.** For a cloud provider it did nothing: memoQ fixes its own limit when the MT settings are first created, and Supervertaler set none of its own. Supervertaler now sends no more requests at once than the number you set, from the next request on, so lowering it takes effect straight away – useful if a provider says you are sending too many. Raising it above the number memoQ settled on when the MT settings were created (usually 4) makes no difference, because memoQ never sends more at once. If you chose Ollama in version 0.1.12 or 0.1.13, your cloud value may have been left at 1, which now means one request at a time: set it to 4.
+- **The note beside Parallel requests says what it means.** *Cloud and local servers each keep their own* read like a switched-off control and did not say what was kept. It now says: *Saved separately for cloud providers and for local servers. 4 suits a cloud provider; 1 suits a model on your own computer.*
+- **"Segments per request" is now "Segments per batch"**, as in the editor, and memoQ's settings dialog no longer cuts it off as *Segments per*.
+
 ## [0.1.19] – 2026-10-13
 
 ### Changed

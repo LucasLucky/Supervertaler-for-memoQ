@@ -75,6 +75,55 @@ public static class LocalHarness
         usageType = plugin.GetType("Supervertaler.Core.ApiUsage", true);
         queueType = plugin.GetType("Supervertaler.MemoQ.Core.LocalQueue", true);
         turnType = queueType.GetNestedType("Turn", BindingFlags.NonPublic | BindingFlags.Public);
+        gateType = plugin.GetType("Supervertaler.MemoQ.Core.CloudGate", true);
+    }
+
+    static Type gateType;
+
+    /// What the cloud gate holds now - for checking nothing is left behind.
+    public static string GateState() { return (string)gateType.GetMethod("State", Any).Invoke(null, null); }
+
+    /// Anthropic with room for one: holds the place with "A", lines up the
+    /// script - "B:i" someone is looking at it, "X:b" a Pre-translate batch,
+    /// "C:x" given up while it waits, "F:fail" a request that fails - then lets
+    /// A finish. Returns the order the requests ran in, and what each caller got.
+    public static string CloudOrder(string script)
+    {
+        object g = General("Anthropic", "m", 1, "");
+        object client = Client("Anthropic", "m", "");
+        var order = new List<string>();
+        object gate = new object();
+        var hold = new TaskCompletionSource<string>();
+
+        Task<string> first = Ask(g, client, () => { lock (gate) order.Add("A"); return hold.Task; },
+            "cloud A", "s", CancellationToken.None, Turn(true, false));
+
+        var tasks = new List<Task<string>>();
+        var cancels = new List<CancellationTokenSource>();
+        foreach (string item in script.Split(','))
+        {
+            string[] parts = item.Split(':');
+            string label = parts[0], kind = parts[1];
+            var cancel = new CancellationTokenSource();
+            if (kind == "x") cancels.Add(cancel);
+            Func<Task<string>> request;
+            if (kind == "fail") request = () => { lock (gate) order.Add(label); throw new InvalidOperationException("boom"); };
+            else request = () => { lock (gate) order.Add(label); return Task.FromResult("reply " + label); };
+            tasks.Add(Ask(g, client, request, "cloud " + label, "s", cancel.Token, Turn(kind != "b", false)));
+        }
+
+        foreach (var c in cancels) c.Cancel();
+        hold.SetResult("reply A");
+        first.Wait(5000);
+
+        var got = new List<string>();
+        foreach (var task in tasks)
+        {
+            try { task.Wait(5000); got.Add(task.Result); }
+            catch (Exception e) { got.Add(Describe(e).Split(':')[0]); }
+        }
+
+        lock (gate) return string.Join(",", order) + " | " + string.Join(",", got);
     }
 
     static object General(string provider, string model, int parallel, string endpoint)
@@ -450,8 +499,21 @@ $m = [LocalHarness]::MaxConcurrent('Ollama', 1, 4)
 Check ($m -eq 1) "Ollama with Parallel requests 1: one at a time (saw $m)"
 $m = [LocalHarness]::MaxConcurrent('OpenAI-compatible', 3, 6)
 Check ($m -eq 3) "OpenAI-compatible with Parallel requests 3: three at a time (saw $m)"
+# A cloud provider waits only for a place. Until 0.1.20 it did not wait at all,
+# and memoQ's own limit is fixed when the MT settings resource is created, so
+# the cloud value of Parallel requests did nothing (found 2026-10-14).
 $m = [LocalHarness]::MaxConcurrent('Anthropic', 1, 4)
-Check ($m -eq 4) "a cloud provider is not queued here (saw $m)"
+Check ($m -eq 1) "Anthropic with Parallel requests 1: one at a time (saw $m)"
+$m = [LocalHarness]::MaxConcurrent('Google', 3, 6)
+Check ($m -eq 3) "Google with Parallel requests 3: three at a time (saw $m)"
+$o = [LocalHarness]::CloudOrder('X:b,Y:i,Z:b')
+Check ($o -eq 'A,Y,X,Z | reply X,reply Y,reply Z') "cloud: a segment being looked at goes before Pre-translate, which keeps its order ($o)"
+$o = [LocalHarness]::CloudOrder('B:x,C:i')
+Check ($o -eq 'A,C | TaskCanceledException,reply C') "cloud: a request given up while it waits is never sent ($o)"
+$o = [LocalHarness]::CloudOrder('F:fail,G:i')
+Check ($o -eq 'A,F,G | InvalidOperationException,reply G') "cloud: a request that fails gives its place back ($o)"
+$s = [LocalHarness]::GateState()
+Check ($s -eq 'waiting 0, running 0') "and nothing is left behind at the cloud gate ($s)"
 Check ([LocalHarness]::FailureFreesTheQueue($true)) "a request that throws at once frees its place"
 Check ([LocalHarness]::FailureFreesTheQueue($false)) "a request that fails later frees its place"
 
@@ -893,6 +955,46 @@ try {
     Check ($box.Checked -eq $isForever.Invoke($null, @($realBefore))) "ticked exactly when Ollama is already set to keep it ('$realBefore')"
 }
 finally { $form.Dispose() }
+
+# ---- 11a. memoQ's font ---------------------------------------------------------
+# memoQ gives the plugin's dialog its own font from the start: Segoe UI 9.75,
+# measured from a screenshot on 2026-10-14 in which "Segments per request" showed
+# as "Segments per" - 137 px of text in a 130 px caption. WinForms reads
+# Control.DefaultFont when a control is made, so it is set the same way here, and
+# last, because it applies to every form made after it.
+Write-Host "-- memoQ's font"
+$defaultFont = [Windows.Forms.Control].GetField('defaultFont', $Static)
+$fontBefore = $defaultFont.GetValue($null)
+$defaultFont.SetValue($null, (New-Object Drawing.Font('Segoe UI', [single]9.75)))
+try {
+    $forms = @(
+        @{ Name = "memoQ's dialog"; Form = [Activator]::CreateInstance($plugin.GetType('Supervertaler.MemoQ.Settings.OptionsForm'), $Ctor, $null, @($settings), $null) }
+        @{ Name = "the editor's dialog"; Form = [Activator]::CreateInstance($editor.GetType('Supervertaler.PromptEditor.SettingsForm'), $Ctor, $null, @(), $null) }
+    )
+    foreach ($d in $forms) {
+        $form = $d.Form
+        try {
+            $captions = @($form.Controls | Where-Object { $_ -is [Windows.Forms.Label] -and -not $_.AutoSize -and -not $_.AutoEllipsis -and $_.Left -lt 40 -and $_.Text })
+            $cut = @($captions | Where-Object { $_.PreferredSize.Width -gt $_.Width } | ForEach-Object { "'$($_.Text)' needs $($_.PreferredSize.Width) of $($_.Width) px" })
+            Check ($captions.Count -ge 6 -and $cut.Count -eq 0) "$($d.Name), in $($form.Font.Name) $($form.Font.SizeInPoints): all $($captions.Count) captions fit on one line$(if ($cut) { ' - ' + ($cut -join '; ') })"
+
+            # The note beside Parallel requests: says what is kept apart and
+            # what to choose, wraps, and is not covered by the row below.
+            $note = @($form.Controls | Where-Object { $_ -is [Windows.Forms.Label] -and $_.Text -like 'Saved separately for cloud providers*' })
+            Check ($note.Count -eq 1) "$($d.Name): the Parallel requests note says what is saved separately"
+            if ($note.Count -eq 1) {
+                $n = $note[0]
+                $batch = Field $form '_batchSize'
+                $need = $n.GetPreferredSize((New-Object Drawing.Size($n.Width, 0))).Height
+                Check ($n.Text -like '*4 suits a cloud provider*' -and $n.Text -like '*1 suits a model on your own computer*') "$($d.Name): and what to choose"
+                Check ($n.Height -ge $need -and $n.Right -le $form.ClientSize.Width) "$($d.Name): the note is shown whole ($($n.Width)x$($n.Height) px, $need needed)"
+                Check ($n.Bottom -le $batch.Top) "$($d.Name): and the row below starts under it ($($n.Bottom) / $($batch.Top))"
+            }
+        }
+        finally { $form.Dispose() }
+    }
+}
+finally { $defaultFont.SetValue($null, $fontBefore) }
 
 # ---- 12. a real Ollama, when there is one ------------------------------------
 Write-Host "-- live Ollama"
