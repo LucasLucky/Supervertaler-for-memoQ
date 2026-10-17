@@ -69,21 +69,25 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", default="0.1.0")
     ap.add_argument("--server-project", default=str(DEFAULT_SERVER_PROJECT))
-    ap.add_argument("--skip-publish", action="store_true", help="reuse the existing publish output")
+    ap.add_argument("--skip-publish", action="store_true", help="reuse what the last run published to dist/mcp-server")
     args = ap.parse_args()
 
     project = Path(args.server_project)
     if not (project / "Supervertaler.McpServer.csproj").exists():
         print(f"ERROR: server project not found at {project}", file=sys.stderr)
         return 1
-    publish_dir = project / "bin" / "Release" / "net8.0" / "win-x64" / "publish"
+    # Our own folder, not the server project's bin\...\publish. MCP clients are
+    # configured to run the exe straight from there - on 2026-10-17 six
+    # processes were - and Windows will not overwrite a running exe, so the
+    # 0.1.21 release stopped at "Access to the path ... is denied".
+    publish_dir = DIST / "mcp-server"
 
     if not args.skip_publish:
         print("== dotnet publish (Release, win-x64, self-contained single file) ==")
         subprocess.run(
             ["dotnet", "publish", "-c", "Release", "-r", "win-x64", "--self-contained", "true",
              "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
-             f"-p:Version={args.version}"],
+             f"-p:Version={args.version}", "-o", str(publish_dir)],
             cwd=project, check=True)
 
     exe = publish_dir / "SupervertalerMcpServer.exe"
