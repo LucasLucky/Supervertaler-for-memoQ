@@ -462,8 +462,10 @@ providers.
   two local providers it shows the waiting notice (below) and does three things:
   - queues requests in the plugin, sized by Parallel requests and read on every
     call, so the time limit starts when a request is sent;
-  - turns core's time limit into a `TimeoutException`, not a cancellation, which
-    would otherwise send every row of a batch back for the full limit again;
+  - keeps a time limit a `TimeoutException`, not a cancellation, which would
+    otherwise send every row of a batch back for the full limit again. Core
+    throws one itself since c2eb1b2; memoQ rewords it, because core's message
+    offers "a longer timeout in the AI settings", which memoQ does not have;
   - says "Is it running?" when nothing is listening.
 - **Ollama silently truncates a long prompt.** Measured 2026-10-12, Ollama
   0.35.1, no GPU: the default context is 4,096 tokens (Ollama picks it from
@@ -474,12 +476,26 @@ providers.
   `EnsureWholePromptRead` refuses any reply where the server read less than half
   the estimated prompt, and `ContextTooSmallException` makes a batch skip the
   row-by-row retry.
-- **Core does not send `num_ctx`.** That is why the add-in refuses rather than
-  fixes. Sending it is proposed to core's owner. When it lands, choose the size
-  from fixed steps: a change of `num_ctx` reloads the model (8 s measured).
+- **Core sends `num_ctx`, `keep_alive` and `think` (core 28c6c74 and c2eb1b2,
+  taken in on 2026-10-17).** Proposed from here on 10-12, written by the Trados
+  session.
+  - `num_ctx` is 2 × the chars/4 estimate + num_predict, rounded up to 8k, 16k,
+    32k, 64k or 128k. Per endpoint + model it never drops below the largest size
+    that has worked in this process, since a new size reloads the model.
+  - It **overrides Ollama's own Context length setting**. So for Ollama a short
+    read now means the model's own window (or the 128k ceiling), and
+    `TooSmallMessage` names the model, never that setting. LM Studio and other
+    OpenAI-compatible servers still get "raise the context length".
+  - Core also refuses a short read itself, inside the call, as a
+    `PromptTooLargeException`. `AskQueuedAsync` catches it and rethrows it as a
+    `ContextTooSmallException` in memoQ's words, so a batch is still not retried
+    row by row.
+  - `think: false`: Gemma 4 and Qwen 3.x think by default and nothing reads it.
+    One paragraph on gemma4:26b-a4b took 213 s with it, 8.4 s without.
 - **Speed on a CPU:** TranslateGemma 4B took 622 s to read 25,000 tokens the
-  first time and 6 s on every repeat. Hence the 30-minute `LocalTimeoutMinutes`
-  for Ollama. Core's OpenAI-compatible path still has its own 10 minutes.
+  first time and 6 s on every repeat. Hence the 30-minute `LocalTimeoutMinutes`,
+  which since c2eb1b2 core applies to OpenAI-compatible servers too (they had
+  the 2-minute cloud limit).
 - **Keys.** Ollama is sent none. OpenAI-compatible reads only the shared file's
   `custom_openai` slot, never the provider-less leftovers (`apikey`,
   `apikey.memoq`): those hold a cloud key, and a typed address may belong to
@@ -541,9 +557,18 @@ after the last request, and the next segment then re-reads everything.
 - An empty `/api/generate` or `/api/chat` carrying `keep_alive` returns
   `done_reason: "load"` but does NOT renew a model that is already loaded:
   `/api/ps` showed the same `expires_at` after both.
-- The `keep_alive` must travel with core's own request. That is proposed to the
-  owner in the handoff.
-- Until then: the `OLLAMA_KEEP_ALIVE` environment variable, then restart Ollama.
+- The `keep_alive` must travel with core's own request. **It does since core
+  c2eb1b2: `"4h"` on every Ollama request.** It is not -1, because Trados
+  Studio's normal close runs none of the plugin's shutdown code.
+- A request's `keep_alive` beats the `OLLAMA_KEEP_ALIVE` variable: measured
+  2026-10-17, with the variable at -1 the model loaded with a 4-hour expiry. So
+  the editor's "Keep the model loaded while Ollama runs" box (0.1.15, which set
+  that variable) did nothing for Supervertaler any more, and was removed the
+  same day. The variable is left as the translator set it; it is Ollama's, and
+  other programs may rely on it.
+- Ollama does honour `keep_alive: 0` for a loaded model: an empty
+  `/api/generate` returned `done_reason: "unload"` (Trados session, 0.40.5).
+  `local-models-test` uses that to unload its model afterwards.
 
 **Ollama's cloud.** A model named `*-cloud` or `*:cloud` runs on ollama.com.
 - `/api/tags` lists it with `remote_host: https://ollama.com` and
@@ -584,8 +609,9 @@ memoQ's look-ahead rows before the segment the translator was waiting on.
   happens after `EnterAsync`, like the overtaken check.
 
 **A model's own window.** Ollama loads a model with the smaller of its own
-context length and the Context length setting (qwen2.5:7b 32,768 and
-aya-expanse:8b 8,192 under one setting of 32,768). It cuts a prompt only when
+context length and the size asked for: the Context length setting until
+2026-10-17, core's `num_ctx` since (qwen2.5:7b 32,768 and aya-expanse:8b 8,192
+under one setting of 32,768). It cuts a prompt only when
 it exceeds the whole window, and then keeps about half (`llama_server.go`,
 read 2026-10-13: limit `numCtx - (numCtx - numKeep)/2`). `LocalServer` asks
 `/api/show` for the model's `<arch>.context_length` on every request (about

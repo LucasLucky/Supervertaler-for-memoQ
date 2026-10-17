@@ -54,7 +54,11 @@ function Call($type, $name, $argv) {
     $raw = @($argv | ForEach-Object {
         if ($null -ne $_ -and $_ -is [PSObject]) { $_.PSObject.BaseObject } else { $_ }
     })
-    $type.GetMethod($name, $Static).Invoke($null, $raw)
+    # By name AND argument count: core added MemoryBanks.List(root) beside
+    # List() on 2026-10-09, and a lookup by name alone stopped finding either.
+    $m = @($type.GetMethods($Static) | Where-Object { $_.Name -eq $name -and $_.GetParameters().Count -eq $raw.Count })
+    if ($m.Count -ne 1) { throw "Call: $($m.Count) methods named $name take $($raw.Count) arguments" }
+    $m[0].Invoke($null, $raw)
 }
 function SetProp($type, $name, $value) { $type.GetProperty($name, $Static).SetValue($null, $value) }
 function GetProp($type, $name) { $type.GetProperty($name, $Static).GetValue($null) }

@@ -8,7 +8,9 @@
 #     not go there;
 #   - Ollama's context window is 4,096 tokens unless told otherwise, and a
 #     longer prompt is cut in the middle and answered as if nothing happened
-#     (measured 2026-10-12). The plugin must refuse that answer;
+#     (measured 2026-10-12). Core now tells it (num_ctx) and refuses a short
+#     read itself, but a model's own window can still be smaller than the
+#     prompt. The plugin must refuse that answer, in its own words;
 #   - requests to the translator's own server queue in the plugin, so a failed
 #     one must still free its place, and a time limit must not turn into a
 #     cancellation that sends every row of a batch back to wait again.
@@ -354,6 +356,9 @@ public static class LocalHarness
         CancellationTokenSource cts = new CancellationTokenSource();
         Func<Task<string>> request;
         if (failure == "timeout")
+            request = () => { throw new TimeoutException("Ollama did not answer within 30 minutes, so the request was abandoned."
+                + " A longer timeout in the AI settings, a smaller model or a shorter prompt helps."); };
+        else if (failure == "other-limit")
             request = () => { throw new TaskCanceledException(); };
         else if (failure == "caller-cancelled")
             request = () => { cts.Cancel(); throw new OperationCanceledException(cts.Token); };
@@ -371,29 +376,51 @@ public static class LocalHarness
         catch (Exception e) { return Describe(e); }
     }
 
+    static object Usage(int regular, int cacheRead)
+    {
+        if (regular < 0) return null;
+        object usage = Activator.CreateInstance(usageType);
+        usageType.GetField("RegularInputTokens").SetValue(usage, regular);
+        usageType.GetField("CacheReadTokens").SetValue(usage, cacheRead);
+        return usage;
+    }
+
     /// What the truncation check says about a reply that read this many tokens.
     public static string Judge(int regular, int cacheRead, int sentChars)
     {
-        object usage = null;
-        if (regular >= 0)
-        {
-            usage = Activator.CreateInstance(usageType);
-            usageType.GetField("RegularInputTokens").SetValue(usage, regular);
-            usageType.GetField("CacheReadTokens").SetValue(usage, cacheRead);
-        }
-        try { ensureRead.Invoke(null, new object[] { usage, new string('x', sentChars), null, model, window }); return "accepted"; }
+        object usage = Usage(regular, cacheRead);
+        try { ensureRead.Invoke(null, new object[] { usage, new string('x', sentChars), null, provider, model, window }); return "accepted"; }
         catch (Exception e) { return Describe(e); }
     }
 
-    static string model;
+    static string provider = "OpenAI-compatible", model;
     static int? window;
 
-    /// The same, for a model whose own window is known.
-    public static string JudgeFor(int regular, int sentChars, string modelName, int modelWindow)
+    /// The same, for a given kind of server and a model whose own window is known (0: not known).
+    public static string JudgeFor(string providerName, int regular, int sentChars, string modelName, int modelWindow)
     {
-        model = modelName; window = modelWindow;
+        provider = providerName; model = modelName; window = modelWindow > 0 ? (int?)modelWindow : null;
         try { return Judge(regular, 0, sentChars); }
-        finally { model = null; window = null; }
+        finally { provider = "OpenAI-compatible"; model = null; window = null; }
+    }
+
+    /// What reaches the caller when core refuses a short read itself
+    /// (PromptTooLargeException, thrown before the request returns), with the
+    /// server's count left in LastUsage as core leaves it - or none (-1).
+    public static string CoreRefusal(int regular, int sentChars)
+    {
+        object g = General("Ollama", "qwen2.5:7b", 1, "http://localhost:1");
+        object client = Client("Ollama", "qwen2.5:7b", "http://localhost:1");
+        Type refusal = usageType.Assembly.GetType("Supervertaler.Core.PromptTooLargeException", true);
+        PropertyInfo last = client.GetType().GetProperty("LastUsage");
+        string user = new string('x', sentChars);
+        Func<Task<string>> request = () =>
+        {
+            last.GetSetMethod(true).Invoke(client, new object[] { Usage(regular, 0) });
+            throw (Exception)Activator.CreateInstance(refusal, "core's own words");
+        };
+        try { Ask(g, client, request, user, null, CancellationToken.None).Wait(); return "none"; }
+        catch (Exception e) { return Describe(e); }
     }
 
     /// What the check before sending says about a prompt this long for a model this size.
@@ -552,7 +579,10 @@ Check ($o -like '*stopped in under 3 s') "at once, not when the request would ha
 # ---- 5. how a failure reaches memoQ -----------------------------------------
 Write-Host "-- failures"
 $o = [LocalHarness]::Outcome('Ollama', 'timeout')
-Check ($o -like 'TimeoutException:*did not answer in time*') "core's time limit is a failure, not a cancellation ($o)"
+Check ($o -like 'TimeoutException:*Ollama at http://localhost:1 did not answer within 30 minutes*memory bank*') "core's time limit is a failure, in memoQ's words ($o)"
+Check ($o -notlike '*AI settings*') "and offers no timeout setting, which memoQ does not have"
+$o = [LocalHarness]::Outcome('Ollama', 'other-limit')
+Check ($o -like 'TimeoutException:*did not answer within*') "a cancellation nobody asked for is a time limit too, not a cancellation ($o)"
 $o = [LocalHarness]::Outcome('Ollama', 'caller-cancelled')
 Check ($o -like '*CanceledException*') "a caller giving up is still a cancellation ($o)"
 $o = [LocalHarness]::Outcome('Ollama', 'refused')
@@ -561,8 +591,10 @@ $o = [LocalHarness]::Outcome('Ollama', 'broke-off')
 Check ($o -like 'InvalidOperationException:*broke off before it answered*kept alive*try the segment again*') "a connection that broke off says so, not 'an error occurred' ($o)"
 $o = [LocalHarness]::Outcome('Ollama', 'error')
 Check ($o -like 'HttpRequestException:*500*') "a server that answers badly keeps its own message"
+$o = [LocalHarness]::Outcome('Anthropic', 'other-limit')
+Check ($o -like 'TaskCanceledException*') "a cloud provider's failures pass through untouched ($o)"
 $o = [LocalHarness]::Outcome('Anthropic', 'timeout')
-Check ($o -like 'TaskCanceledException*') "a cloud provider's failures pass through untouched"
+Check ($o -like 'TimeoutException: Ollama did not answer within 30 minutes, so the request was abandoned.*') "core's time limit too, in core's words ($o)"
 
 # ---- 6. a prompt the server cut ----------------------------------------------
 Write-Host "-- truncation"
@@ -570,6 +602,7 @@ Write-Host "-- truncation"
 $o = [LocalHarness]::Judge(2051, 0, 100000)
 Check ($o -like 'ContextTooSmallException:*2,051 of about 25,000*') "2,051 of 25,000 tokens read is refused ($o)"
 Check ($o -like '*at least 32,768 tokens*') "and names a context length that would fit"
+Check ($o -notlike '*Ollama*') "an OpenAI-compatible server is not sent to Ollama's settings"
 Check ([LocalHarness]::Judge(20000, 0, 100000) -eq 'accepted') "20,000 of 25,000 is accepted (tokenisers differ)"
 Check ([LocalHarness]::Judge(3000, 10000, 100000) -eq 'accepted') "cached tokens count as read"
 Check ([LocalHarness]::Judge(-1, 0, 100000) -eq 'accepted') "no count from the server is no judgement"
@@ -578,13 +611,30 @@ Check ([LocalHarness]::Judge(100, 0, 4000) -eq 'accepted') "a prompt below 1,500
 
 # A model whose own window is smaller than the prompt: no setting helps, and
 # the message used to send the translator to one (aya-expanse:8b, 2026-10-13).
-$o = [LocalHarness]::JudgeFor(4099, 100000, 'aya-expanse:8b', 8192)
+$o = [LocalHarness]::JudgeFor('Ollama', 4099, 100000, 'aya-expanse:8b', 8192)
 Check ($o -like '*aya-expanse:8b can hold at most 8,192 tokens*no setting raises it*memory bank*') "a cut by the model's own limit says so ($o)"
 Check ($o -notlike '*Raise the server*') "and does not send the translator to a setting"
-$o = [LocalHarness]::JudgeFor(2051, 100000, 'qwen2.5:7b', 32768)
-Check ($o -like '*Raise the server*at least 32,768 tokens*') "a model that holds more still gets the setting ($o)"
-$o = [LocalHarness]::JudgeFor(2051, 100000, 'm', 30000)
+# Core sends Ollama a context size that holds the prompt, overriding Ollama's
+# own Context length setting (2026-10-17): for Ollama a short read is always
+# the model, and that setting no longer does anything.
+foreach ($w in 32768, 0) {
+    $o = [LocalHarness]::JudgeFor('Ollama', 2051, 100000, 'qwen2.5:7b', $w)
+    Check ($o -like '*qwen2.5:7b holds fewer tokens than this prompt*no setting raises it*') "Ollama, window $(if ($w) {$w} else {'unknown'}): the model is named as the limit ($o)"
+    Check ($o -notlike '*Raise the server*' -and $o -notlike '*Context length*') "and Ollama's Context length setting is not offered"
+}
+$o = [LocalHarness]::JudgeFor('OpenAI-compatible', 2051, 100000, 'qwen2.5:7b', 0)
+Check ($o -like '*Raise the server*at least 32,768 tokens*LM Studio*') "an OpenAI-compatible server still gets its setting ($o)"
+$o = [LocalHarness]::JudgeFor('OpenAI-compatible', 2051, 100000, 'm', 30000)
 Check ($o -like '*at least 30,000 tokens*') "and never a size larger than the model holds ($o)"
+
+# Core refuses a short read itself, before the request returns: memoQ's words,
+# and the exception a batch does not retry row by row.
+$o = [LocalHarness]::CoreRefusal(4099, 100000)
+Check ($o -like 'ContextTooSmallException:*4,099 of about 25,000*qwen2.5:7b holds fewer tokens*') "core's refusal reaches memoQ in memoQ's words ($o)"
+$o = [LocalHarness]::CoreRefusal(-1, 100000)
+Check ($o -eq "ContextTooSmallException: core's own words") "with no count to word it by, core's message, still as the type a batch does not retry ($o)"
+$s = [LocalHarness]::QueueState()
+Check ($s -eq 'waiting 0, running 0, flights 0') "and the refusal leaves nothing behind in the queue ($s)"
 
 # Before sending: a prompt that cannot fit is refused at once, not after the
 # five minutes it took Ollama to read the part it kept.
@@ -932,30 +982,6 @@ foreach ($d in $dialogs) {
     finally { $form.Dispose() }
 }
 
-# Keep the model loaded: Ollama's own OLLAMA_KEEP_ALIVE, for this Windows
-# account, switched from the editor's settings. Ollama unloads after five idle
-# minutes, and on 2026-10-13 a 34-minute pause cost a full re-read.
-$keep = $editor.GetType('Supervertaler.PromptEditor.OllamaKeepAlive')
-$isForever = $keep.GetMethod('IsForever', $Static)
-foreach ($c in @(@('-1', $true), @('-1m', $true), @(' -24h ', $true), @('30m', $false), @('0', $false), @('', $false), @($null, $false))) {
-    Check ($isForever.Invoke($null, @($c[0])) -eq $c[1]) "OLLAMA_KEEP_ALIVE '$($c[0])' is $(if ($c[1]) {''} else {'not '})forever"
-}
-$realBefore = [Environment]::GetEnvironmentVariable('OLLAMA_KEEP_ALIVE', 'User')
-$changed = $keep.GetMethod('Set', $Static).Invoke($null, @(-not $isForever.Invoke($null, @($realBefore))))
-Check (-not $changed -and [Environment]::GetEnvironmentVariable('OLLAMA_KEEP_ALIVE', 'User') -eq $realBefore) "a test run never changes the real setting (still '$realBefore')"
-
-$form = [Activator]::CreateInstance($editor.GetType('Supervertaler.PromptEditor.SettingsForm'), $Ctor, $null, @(), $null)
-try {
-    $box = Field $form '_keepLoaded'
-    $provider = Field $form '_provider'
-    $provider.SelectedItem = 'Ollama'
-    Check ($box.Enabled) "the editor offers 'keep the model loaded' under Ollama"
-    $provider.SelectedItem = 'Anthropic'
-    Check (-not $box.Enabled) "and greys it out for a cloud provider"
-    Check ($box.Checked -eq $isForever.Invoke($null, @($realBefore))) "ticked exactly when Ollama is already set to keep it ('$realBefore')"
-}
-finally { $form.Dispose() }
-
 # ---- 11a. memoQ's font ---------------------------------------------------------
 # memoQ gives the plugin's dialog its own font from the start: Segoe UI 9.75,
 # measured from a screenshot on 2026-10-14 in which "Segments per request" showed
@@ -1011,31 +1037,44 @@ elseif (-not ($tags.models | Where-Object { $_.name -eq $model })) {
     Write-Host "SKIP $model is not installed (set SV_OLLAMA_MODEL to another)"
 }
 else {
-    $fetch = $catalog.GetMethod('FetchAsync', $Static)
-    $listed = $fetch.Invoke($null, @('Ollama', '', 'http://localhost:11434/v1', [Threading.CancellationToken]::None)).Result
-    Check (@($listed | Where-Object { $_.Id -eq $model }).Count -eq 1) "Fetch list, keyless and through a /v1 address, finds $model ($(@($listed).Count) installed)"
+    # Core asks Ollama to keep a model loaded for four hours. Unloaded again at
+    # the end - whatever happens - unless it was loaded before the run, when it
+    # is someone's and stays.
+    $loadedBefore = $false
+    try { $loadedBefore = [bool]((Invoke-RestMethod -Uri 'http://localhost:11434/api/ps' -TimeoutSec 3).models | Where-Object { $_.name -eq $model }) } catch { $loadedBefore = $true }
+    try {
+        $fetch = $catalog.GetMethod('FetchAsync', $Static)
+        $listed = $fetch.Invoke($null, @('Ollama', '', 'http://localhost:11434/v1', [Threading.CancellationToken]::None)).Result
+        Check (@($listed | Where-Object { $_.Id -eq $model }).Count -eq 1) "Fetch list, keyless and through a /v1 address, finds $model ($(@($listed).Count) installed)"
 
-    $o = [LocalHarness]::Live('', $model, 'Translate from English into Dutch. Reply with the translation only.', 'The ring is fastened.')
-    Check ($o -like 'reply: *') "a short prompt is translated ($o)"
+        $o = [LocalHarness]::Live('', $model, 'Translate from English into Dutch. Reply with the translation only.', 'The ring is fastened.')
+        Check ($o -like 'reply: *') "a short prompt is translated ($o)"
 
-    $o = [LocalHarness]::Live('http://localhost:11999', $model, 'x', 'y')
-    Check ($o -like '*Could not reach Ollama at http://localhost:11999*') "a wrong port says nothing is listening ($o)"
+        $o = [LocalHarness]::Live('http://localhost:11999', $model, 'x', 'y')
+        Check ($o -like '*Could not reach Ollama at http://localhost:11999*') "a wrong port says nothing is listening ($o)"
 
-    # The measured case: an instruction at the top of a long prompt. Either the
-    # server reads all of it, or the plugin refuses the answer - never a reply
-    # made without the instruction.
-    $claim = 'Claim {0}: the fastening element according to claim {1}, wherein the retaining ring engages the groove at a depth of {0}.{1} millimetres. '
-    $filler = -join (1..700 | ForEach-Object { $claim -f $_, ($_ % 7 + 1) })
-    $system = "Translate from English into Dutch. Reply with the translation only.`n`n$filler"
-    $started = Get-Date
-    $o = [LocalHarness]::Live('', $model, $system, 'The ring is fastened.')
-    $secs = [int]((Get-Date) - $started).TotalSeconds
-    if ($o -like 'ContextTooSmallException:*') {
-        Check $true "a 25,000-token prompt cut by the server is refused (${secs}s): $o"
+        # The measured case: an instruction at the top of a prompt longer than
+        # Ollama's own default of 4,096 tokens, which used to cut it. Core sends
+        # a context size that holds it (2026-10-17), so it is read whole and
+        # answered. About 6,000 tokens: enough to be cut at 4,096, and a few
+        # minutes' reading on a computer without a graphics card.
+        $claim = 'Claim {0}: the fastening element according to claim {1}, wherein the retaining ring engages the groove at a depth of {0}.{1} millimetres. '
+        $filler = -join (1..180 | ForEach-Object { $claim -f $_, ($_ % 7 + 1) })
+        $system = "Translate from English into Dutch. Reply with the translation only.`n`n$filler"
+        $started = Get-Date
+        $o = [LocalHarness]::Live('', $model, $system, 'The ring is fastened.')
+        $secs = [int]((Get-Date) - $started).TotalSeconds
+        Check ($o -like 'reply: *') "a prompt longer than Ollama's default window is read whole and answered (${secs}s): $o"
     }
-    else {
-        Write-Host "INFO the server read the whole long prompt (${secs}s); its context window is large enough here"
-        Check ($o -like 'reply: *') "and the reply came back ($o)"
+    finally {
+        if (-not $loadedBefore) {
+            try {
+                Invoke-RestMethod -Uri 'http://localhost:11434/api/generate' -Method Post -TimeoutSec 30 -ContentType 'application/json' `
+                    -Body (@{ model = $model; keep_alive = 0 } | ConvertTo-Json) | Out-Null
+                Write-Host "INFO $model unloaded again"
+            }
+            catch { Write-Host "INFO $model could not be unloaded ($($_.Exception.Message)); Ollama frees it after four hours" }
+        }
     }
 }
 

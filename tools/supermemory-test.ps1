@@ -38,7 +38,7 @@ function Check($ok, $label) {
 function Field($obj, $name) { $obj.GetType().GetProperty($name).GetValue($obj) }
 
 # ---- 1. the banks on disk -------------------------------------------------
-$names = $banksType.GetMethod('List', $Static).Invoke($null, @())
+$names = $banksType.GetMethod('List', $Static, $null, [Type[]]@(), $null).Invoke($null, @())
 Check ($names.Count -gt 0) "banks found on disk: $($names.Count)"
 
 # _shared is not a sibling: it layers underneath whichever bank is read. Sorting

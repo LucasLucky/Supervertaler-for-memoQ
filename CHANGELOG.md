@@ -6,6 +6,20 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Changed
+
+- **Ollama now reads the whole prompt, whatever its Context length setting.** Supervertaler tells Ollama how much room each request needs, so Ollama no longer cuts a long prompt to its own default of 4,096 tokens, and you no longer need to raise *Context length* in Ollama's settings for Supervertaler. A prompt can still be too large for the model itself. The message under the grid then names the model as the limit and says that switching off *Send the memory bank to the model* usually makes the prompt fit. It no longer points to Ollama's setting, which no longer makes a difference.
+- **Ollama keeps the model loaded for four hours after the last segment.** Until now it unloaded the model after five idle minutes, and on a computer without a graphics card the next segment then spent ten minutes or more reading Supervertaler's instructions again.
+- **Models that "think" first now answer straight away.** Gemma 4, Qwen 3 and similar models work through the problem before they answer unless told not to, and Supervertaler never uses that reasoning. One paragraph took 213 seconds with it and 8 without.
+- **An OpenAI-compatible server now gets 30 minutes per request, as Ollama does.** It had two, which a model on a computer without a graphics card cannot always manage for the first segment of a document.
+- **A local model that runs out of time says how long it had.** The message under the grid now reads *did not answer within 30 minutes*, says why the first segment can take that long, and suggests a smaller model, fewer segments per batch or leaving out the memory bank.
+
+### Removed
+
+- **The editor's *Keep the model loaded while Ollama runs* box.** Supervertaler now keeps the model loaded for four hours itself, and that overrides the box, so it no longer made any difference to Supervertaler. If you ticked it, Ollama's own `OLLAMA_KEEP_ALIVE` setting is left as it was and still applies to other programs that use Ollama. To undo it, delete `OLLAMA_KEEP_ALIVE` under *Edit environment variables for your account* in Windows, then restart Ollama.
+
 ## [0.1.20] – 2026-10-14
 
 ### Fixed

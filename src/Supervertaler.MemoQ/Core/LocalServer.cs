@@ -148,7 +148,7 @@ namespace Supervertaler.MemoQ.Core
                 {
                     using (var both = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stop))
                         reply = await request(both.Token).ConfigureAwait(false);
-                    EnsureWholePromptRead(client.LastUsage, user, system, general.Model, window);
+                    EnsureWholePromptRead(client.LastUsage, user, system, general.Provider, general.Model, window);
                     work.Answered(turn?.Interactive ?? true, asked);
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested)
@@ -158,17 +158,34 @@ namespace Supervertaler.MemoQ.Core
                     // would send a batch back one row at a time.
                     throw new StoppedException();
                 }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                catch (Exception ex) when (ex is TimeoutException
+                    || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
                 {
-                    // Core's own time limit, not a caller giving up. Left as a
-                    // cancellation it is rethrown as one all the way out, and the
-                    // session then retries every row of the batch alone, each
-                    // with the full limit again. As a failure, a batch is retried
-                    // row by row - smaller requests, which a slow server can
-                    // finish - and each row that still fails says why.
+                    // A time limit, not a caller giving up: core reports its own
+                    // as a TimeoutException, and a cancellation neither token
+                    // asked for is some other limit. Left as a cancellation it
+                    // is rethrown as one all the way out, and the session then
+                    // retries every row of the batch alone, each with the full
+                    // limit again. As a failure, a batch is retried row by row -
+                    // smaller requests, which a slow server can finish - and each
+                    // row that still fails says why. Reworded, because core's
+                    // message offers a timeout setting memoQ does not have.
                     throw new TimeoutException(general.Provider + " at " + Address(general)
-                        + " did not answer in time. A smaller model, or fewer segments per request, "
-                        + "makes each answer quicker.");
+                        + " did not answer within " + LlmProviders.LocalTimeoutMinutes + " minutes, so the "
+                        + "request was given up. Without a graphics card, a model can take that long just to "
+                        + "read a long prompt the first time. A smaller model, fewer segments per batch, or "
+                        + "switching off \"Send the memory bank to the model\" in Settings makes each answer "
+                        + "quicker.", ex);
+                }
+                catch (PromptTooLargeException ex)
+                {
+                    // Core read the server's count before the request returned
+                    // and refused the answer itself. Same judgement as ours, in
+                    // memoQ's words and as the exception a batch does not retry
+                    // row by row: every row carries the same prompt.
+                    EnsureWholePromptRead(client.LastUsage, user, system, general.Provider, general.Model, window);
+                    PluginLog.Write("local server: core refused the reply, with no count to word it by");
+                    throw new ContextTooSmallException(ex.Message);
                 }
                 catch (HttpRequestException ex) when (Unreachable(ex))
                 {
@@ -290,9 +307,12 @@ namespace Supervertaler.MemoQ.Core
         ///
         /// <para>A model's window is part of the model, and no setting raises it.
         /// Ollama loads each model with the smaller of its own window and the
-        /// Context length setting: measured 2026-10-13, under one setting of
-        /// 32,768, qwen2.5:7b loaded with 32,768 and aya-expanse:8b with 8,192.
-        /// One local request, asked for every request rather than remembered:
+        /// context size asked for: measured 2026-10-13, under one Context length
+        /// setting of 32,768, qwen2.5:7b loaded with 32,768 and aya-expanse:8b
+        /// with 8,192. Since 2026-10-17 core asks for a size that holds the prompt
+        /// (num_ctx), which overrides that setting, so the model's own window is
+        /// the only limit left. One local request, asked for every request rather
+        /// than remembered:
         /// about a tenth of a second, beside answers that take half a minute or
         /// more.</para>
         /// </summary>
@@ -535,9 +555,15 @@ namespace Supervertaler.MemoQ.Core
         /// prompt is served from its cache. Half is a wide margin: core's estimate
         /// is four characters a token, and real tokenisers land within a third of
         /// that either way. No count, no judgement.</para>
+        ///
+        /// <para>Since 2026-10-17 core sends Ollama a context size that holds the
+        /// prompt, and makes the same judgement itself, refusing with a
+        /// <see cref="PromptTooLargeException"/> before the request returns. This
+        /// one gives the refusal memoQ's wording, and still guards a reply core
+        /// let through.</para>
         /// </summary>
         internal static void EnsureWholePromptRead(ApiUsage usage, string user, string system,
-            string model = null, int? window = null)
+            string provider, string model = null, int? window = null)
         {
             if (usage == null) return;
 
@@ -548,26 +574,34 @@ namespace Supervertaler.MemoQ.Core
             if (read <= 0 || read * 2L >= sent) return;
 
             PluginLog.Write($"local server: read {read:N0} of about {sent:N0} prompt tokens; reply refused");
-            throw new ContextTooSmallException(TooSmallMessage(read, sent, model, window));
+            throw new ContextTooSmallException(TooSmallMessage(read, sent, provider, model, window));
         }
 
         /// <summary>
-        /// The server's context window is smaller than the prompt. A setting on
-        /// the server, not a fault in one reply, so asking again - one segment at
-        /// a time, as a failed batch otherwise is - sends the same instructions
-        /// into the same window and costs a slow request per row to learn nothing.
+        /// The prompt does not fit: the model's own window, or a server's
+        /// context-length setting, is smaller. Not a fault in one reply, so
+        /// asking again - one segment at a time, as a failed batch otherwise is -
+        /// sends the same instructions into the same window and costs a slow
+        /// request per row to learn nothing.
         /// </summary>
         internal sealed class ContextTooSmallException : InvalidOperationException
         {
             public ContextTooSmallException(string message) : base(message) { }
         }
 
+        /// <param name="provider">
+        /// Which kind of server. Ollama is sent a context size that holds the
+        /// prompt, which overrides its own Context length setting, so for Ollama
+        /// what cut the prompt is the model, and pointing to that setting would
+        /// send the translator to one that no longer does anything.
+        /// </param>
         /// <param name="window">
         /// The model's own window, when known. A prompt larger than that is not
         /// fixed by any setting, and saying "raise the context length" sent the
         /// translator to a setting that could not help.
         /// </param>
-        internal static string TooSmallMessage(int read, int sent, string model = null, int? window = null)
+        internal static string TooSmallMessage(int read, int sent, string provider, string model = null,
+            int? window = null)
         {
             var text = $"The model's server read only {read:N0} of about {sent:N0} tokens of the prompt. The rest - "
                 + "instructions, glossary, memory bank - was cut off, so the answer was not used. ";
@@ -575,9 +609,11 @@ namespace Supervertaler.MemoQ.Core
             if (window != null && sent >= window.Value)
                 return text + $"{Name(model)} can hold at most {window.Value:N0} tokens. " + ModelLimit;
 
+            if (string.Equals(provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase))
+                return text + $"{Name(model)} holds fewer tokens than this prompt. " + ModelLimit;
+
             return text + "Raise the server's context length to at least " + Suggested(sent, window)
-                + ": in Ollama, Settings > Context length (or OLLAMA_CONTEXT_LENGTH), then restart it; in "
-                + "LM Studio, the model's Context Length when it is loaded.";
+                + ": in LM Studio, for example, the model's Context Length when it is loaded.";
         }
 
         /// <summary>
