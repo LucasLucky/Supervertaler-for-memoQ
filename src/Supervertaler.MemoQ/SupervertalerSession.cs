@@ -41,7 +41,7 @@ namespace Supervertaler.MemoQ
 
         public TranslationResult[] TranslateCorrectSegment(Segment[] segs, Segment[] tmSources, Segment[] tmTargets)
         {
-            return TranslateMany(segs, tmSources, tmTargets, null);
+            return TranslateMany(segs, tmSources, tmTargets, null, OriginIfBridged());
         }
 
         // ---- ISessionWithMetadata ---------------------------------------------
@@ -57,22 +57,36 @@ namespace Supervertaler.MemoQ
         public TranslationResult[] TranslateCorrectSegment(
             Segment[] segs, Segment[] tmSources, Segment[] tmTargets, MTRequestMetadata metadata)
         {
+            var origin = OriginIfBridged();
             _context.NoteMetadata(metadata);
             LogMetadataOnce(metadata);
-            return TranslateMany(segs, tmSources, tmTargets, metadata);
+            return TranslateMany(segs, tmSources, tmTargets, metadata, origin);
         }
 
         // ---- shared -----------------------------------------------------------
 
         /// <summary>
-        /// The array overload, which memoQ uses for Pre-translate. Segments go to
+        /// Who in memoQ is asking, read only when bridge mode needs it. Read here,
+        /// at the entry memoQ called, because the batch runs under Task.Run, where
+        /// memoQ's frames are no longer on the stack (<see cref="LookupOriginDetector"/>).
+        /// </summary>
+        private LookupOrigin OriginIfBridged()
+        {
+            return _context.General.BridgeMode ? LookupOriginDetector.Current() : LookupOrigin.Unknown;
+        }
+
+        /// <summary>
+        /// The array overload, which memoQ uses for Pre-translate - and, in memoQ
+        /// 12.5, for the one row the translator lands on as well, which is why
+        /// bridge mode needs <paramref name="origin"/>. Segments go to
         /// the model in batches so that prompts written for batch translation —
         /// the ones that refer to segment numbers — are given the shape they
         /// expect. Set Parallel requests' companion BatchSize to 1 to send them
         /// one at a time.
         /// </summary>
         private TranslationResult[] TranslateMany(
-            Segment[] segs, Segment[] tmSources, Segment[] tmTargets, MTRequestMetadata metadata)
+            Segment[] segs, Segment[] tmSources, Segment[] tmTargets, MTRequestMetadata metadata,
+            LookupOrigin origin)
         {
             if (segs == null) return new TranslationResult[0];
 
@@ -101,14 +115,29 @@ namespace Supervertaler.MemoQ
                         // memoQ's state for the row, recorded with the captured
                         // source so a reader can tell a row that arrived
                         // pre-filled from one nobody has touched.
-                        i => RowAt(metadata, i)?.SegmentStatus))
+                        i => RowAt(metadata, i)?.SegmentStatus,
+                        origin))
                     .GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
+                var results = new TranslationResult[segs.Length];
+
+                // Bridge mode promises a Pre-translate that costs nothing. Falling
+                // back to the model one row at a time would break that promise on
+                // exactly the run that has already gone wrong, so in bridge mode
+                // only a grid lookup gets the fallback.
+                if (_context.General.BridgeMode && origin != LookupOrigin.Grid)
+                {
+                    PluginLog.Write("Batch translation failed entirely in bridge mode; nothing sent to the model", ex);
+                    var failed = BatchTranslator.AsMemoQError(ex);
+                    for (var i = 0; i < segs.Length; i++)
+                        results[i] = new TranslationResult { Exception = failed };
+                    return results;
+                }
+
                 PluginLog.Write("Batch translation failed entirely; falling back to one at a time", ex);
 
-                var results = new TranslationResult[segs.Length];
                 for (var i = 0; i < segs.Length; i++)
                     results[i] = TranslateOne(segs[i], At(tmSources, i), At(tmTargets, i), RowAt(metadata, i));
                 return results;

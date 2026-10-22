@@ -857,11 +857,28 @@ elevated.
    the live link's "a < b" is text.
 
    **Bridge mode** (`BridgeMode` setting, user-facing label "Pre-translate only
-   captures and delivers staged translations") is scoped to the batch path only.
-   Pre-translate then costs nothing — capture on the first pass, delivery of
-   staged translations on the second — while single-segment lookups keep calling
-   the model, so a chat-driven job still gets live suggestions for rows Claude
-   has not staged. It never needs toggling mid-job.
+   captures and delivers staged translations", since relabelled "Pre-translate
+   via Claude Desktop (MCP)") is scoped to Pre-translate. Pre-translate then costs
+   nothing — capture on the first pass, delivery of staged translations on the
+   second — while grid lookups keep calling the model, so a chat-driven job still
+   gets live suggestions for rows Claude has not staged. It never needs toggling
+   mid-job.
+
+   **Scoping it by overload was wrong.** memoQ 12.5 asks for the row the
+   translator lands on through the ARRAY overload, one row at a time, exactly as
+   Pre-translate does, so until 2026-10-22 bridge mode captured those too and the
+   translator got "No staged translation" instead of a suggestion. Nothing in the
+   public SDK separates them (MTInterfaces 3.0 read in full, the SDK manual, the
+   sample; same engine, same metadata; a one-row Pre-translate is one row). A probe
+   build showed the caller does: `ClientMTManager.SyncLookupSingle` for a click,
+   `PreTranslateAndStatisticsJob.preTranslateBatchMT` for every Pre-translate.
+   `Core/LookupOrigin.cs` reads the stack at session entry (before `Task.Run`).
+   These are memoQ internals, so it fails safe: only a positively recognised grid
+   lookup goes to the model; anything else is captured as before, and the capture
+   log line says "caller not recognised" when memoQ has renamed them - check that
+   after every memoQ upgrade. Test: `tools/lookup-origin-test.ps1` (puts memoQ's
+   real names on a real stack). A failed batch in bridge mode is no longer
+   retried row by row with the model either.
 
    **Second capture channel:** the TB plugin's `Lookup` records every visited row
    into `CaptureStore` under a `visited_<pair>` bucket, regardless of MT provider.

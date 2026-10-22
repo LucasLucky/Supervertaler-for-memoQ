@@ -10,6 +10,9 @@ any release tooling that buckets on these headings works for both.
 
 ### Fixed
 
+- ★ **With *Pre-translate via Claude Desktop (MCP)* ticked, clicking into a segment gives a suggestion again.** The box is meant for Pre-translate: Claude Desktop gets the segments, and the selected model is left alone. But memoQ asks for the segment you click into in the same way as it asks during a Pre-translate, so that segment went to Claude Desktop too, and instead of a suggestion you got *No staged translation for this segment* under the grid. Supervertaler now tells the two apart. The segment you are on is translated with the selected model; Pre-translate still goes to Claude Desktop, including a Pre-translate of a single segment. If a later memoQ asks differently, Supervertaler sends the segment to Claude Desktop, as before, never to a model you pay for.
+- **A Pre-translate for Claude Desktop that fails no longer falls back to the model.** If the whole run failed, Supervertaler retried every segment with the selected model, one at a time – paid requests from a setting that is meant to cost nothing. It now reports the failure on each segment and sends nothing.
+- **The message under the grid names the box as it now reads.** It said to switch off *Pre-translate only captures and delivers staged translations*, an earlier name; it now says *Pre-translate via Claude Desktop (MCP)*.
 - **Claude Desktop no longer sees some segments twice.** Since 0.1.0, a segment the model had translated on its own – each one you clicked into, for example – was added again to the list Claude Desktop reads every time it came up, so that list, and the document text AutoPrompt can work from, could repeat it.
 
 ## [0.1.22] – 2026-10-22

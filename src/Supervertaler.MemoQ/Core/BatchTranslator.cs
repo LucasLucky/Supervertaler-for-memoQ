@@ -92,7 +92,8 @@ namespace Supervertaler.MemoQ.Core
             CancellationToken cancellationToken,
             Segment[] tmSources = null,
             Segment[] tmTargets = null,
-            Func<int, int?> statusOf = null)
+            Func<int, int?> statusOf = null,
+            LookupOrigin origin = LookupOrigin.Unknown)
         {
             var results = new TranslationResult[segments.Length];
             var batchSize = Math.Max(1, Math.Min(100, context.General.BatchSize));
@@ -154,7 +155,15 @@ namespace Supervertaler.MemoQ.Core
 
             // Bridge mode: the rest have been captured for Claude to see, and
             // that is the whole job of this pass. Nothing goes to the model.
-            if (context.General.BridgeMode)
+            //
+            // Except the row the translator has just landed on. memoQ 12.5 asks
+            // for that through this same array overload, and capturing it left the
+            // translator with an error under the grid instead of a suggestion
+            // (seen 2026-10-13, confirmed 2026-10-22). Only a request positively
+            // seen to come from memoQ's grid goes on to the model; a Pre-translate,
+            // or a caller memoQ has since renamed, is captured as before - see
+            // LookupOriginDetector for why it fails that way round.
+            if (context.General.BridgeMode && origin != LookupOrigin.Grid)
             {
                 // An ERROR for each, not an empty translation.
                 //
@@ -175,16 +184,24 @@ namespace Supervertaler.MemoQ.Core
                 // went unnoticed until the rows were read one by one.
                 var reason = AsMemoQError(new InvalidOperationException(
                     "No staged translation for this segment. Stage it over the Supervertaler MCP bridge, "
-                    + "or switch off \"Pre-translate only captures and delivers staged translations\" to translate it with the model."));
+                    + "or switch off \"Pre-translate via Claude Desktop (MCP)\" to translate it with the model."));
 
                 foreach (var i in pending)
                     results[i] = new TranslationResult { Exception = reason };
 
+                // Which caller, on every capture: if memoQ renames its methods,
+                // this is where "caller not recognised" starts appearing.
                 PluginLog.Write($"batch: bridge mode - captured {pending.Count} segment(s), none staged, "
-                    + "reported as no-result so memoQ leaves those targets untouched");
+                    + "reported as no-result so memoQ leaves those targets untouched ("
+                    + (origin == LookupOrigin.PreTranslate ? "Pre-translate" : "caller not recognised, treated as Pre-translate")
+                    + ")");
                 LogRows(results, servedFromStaging, copied, context.General, captured: pending.Count);
                 return results;
             }
+
+            if (context.General.BridgeMode)
+                PluginLog.Write($"batch: bridge mode, but memoQ's grid asked for {pending.Count} row(s) the translator "
+                    + "landed on - translating with the model, as a lookup should");
 
             if (batchSize == 1 || pending.Count == 1)
             {

@@ -38,9 +38,9 @@ function Check($ok, $label) {
 # engine, which seeds settings and can make a billable call. The shape of the
 # branch is what regressed, and the shape is what this guards.
 $src = Get-Content 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ\src\Supervertaler.MemoQ\Core\BatchTranslator.cs' -Raw
-$branch = [regex]::Match($src, 'if \(context\.General\.BridgeMode\)\s*\{(?<body>[\s\S]*?)\n            \}')
+$branch = [regex]::Match($src, 'if \(context\.General\.BridgeMode && origin != LookupOrigin\.Grid\)\s*\{(?<body>[\s\S]*?)\n            \}')
 
-Check ($branch.Success) "the bridge-mode branch is still where the test expects it"
+Check ($branch.Success) "the bridge-mode branch is still where the test expects it, and lets only a grid lookup past"
 $body = $branch.Groups['body'].Value
 
 Check ($body -notmatch 'Translation\s*=\s*Segment\.Empty') `
