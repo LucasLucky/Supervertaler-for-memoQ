@@ -87,6 +87,24 @@ namespace Supervertaler.MemoQ.Settings
         }
 
         /// <summary>
+        /// True when the model runs on a server of the translator's own: Ollama,
+        /// except its cloud models, and an OpenAI-compatible server. Decides which
+        /// Parallel requests value applies - a model on this computer works one
+        /// request at a time, Ollama's servers take several like any cloud
+        /// provider - and whether the waiting notice explains a slow first read.
+        ///
+        /// <para>By name, as the dialogs and the notice must decide before any
+        /// request is made (see <see cref="IsOllamaCloudModel"/>). Until
+        /// 2026-10-22 everything on Ollama counted as local, so a cloud model went
+        /// one batch at a time under a notice about reading the instructions on
+        /// this computer (seen 2026-10-14 with gemma4:31b-cloud).</para>
+        /// </summary>
+        public static bool RunsLocally(string provider, string model)
+        {
+            return TakesEndpoint(provider) && !IsOllamaCloudModel(provider, model);
+        }
+
+        /// <summary>
         /// Whether a request cannot be made without a key. Ollama has none, and a
         /// server of the translator's own may or may not want one.
         /// </summary>

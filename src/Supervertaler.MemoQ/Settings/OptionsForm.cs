@@ -109,14 +109,15 @@ namespace Supervertaler.MemoQ.Settings
             {
                 if (_loading) return;
                 RememberTypedKey();
-                KeepParallel(_lastProvider);
+                KeepParallel();
                 _lastProvider = CurrentProvider;
                 _modelId = "";
 
-                ShowParallel(CurrentProvider);
                 ShowForProvider();
                 ShowKeyFor(CurrentProvider);
                 ShowModels();
+                // After the models: which value applies depends on the model too.
+                ShowParallel();
             };
             Controls.Add(_provider);
             y += rowH;
@@ -137,8 +138,14 @@ namespace Supervertaler.MemoQ.Settings
                 if (_model.SelectedItem is ModelCatalog.Entry entry) _modelId = entry.Id;
             };
 
-            // Picked or typed, a cloud model is said to be one at once.
-            _model.TextChanged += (s, e) => { if (!_loading) ShowCloudWarning(); };
+            // Picked or typed, a cloud model is said to be one at once, and takes
+            // the cloud's Parallel requests.
+            _model.TextChanged += (s, e) =>
+            {
+                if (_loading) return;
+                ShowCloudWarning();
+                FollowParallel();
+            };
             Controls.Add(_model);
             y += rowH;
 
@@ -497,7 +504,7 @@ namespace Supervertaler.MemoQ.Settings
             }
             _cloudParallel = Math.Max(1, Math.Min(16, SharedSettings.ParallelOr(g.MaxParallelRequests)));
             _localParallel = Math.Max(1, Math.Min(16, SharedSettings.LocalParallel));
-            ShowParallel(CurrentProvider);
+            ShowParallel();
             _batchSize.Value = Math.Max(1, Math.Min(100, SharedSettings.BatchSizeOr(g.BatchSize)));
             _useTerminology.Checked = SharedSettings.UseTerminologyContextOr(g.UseTerminologyContext);
             _useDocumentContext.Checked = SharedSettings.UseDocumentContextOr(g.UseDocumentContext);
@@ -881,17 +888,39 @@ namespace Supervertaler.MemoQ.Settings
         private int _cloudParallel = 4;
         private int _localParallel = 1;
 
-        /// <summary>Parks the box's value with the kind of provider it was showing.</summary>
-        private void KeepParallel(string provider)
+        /// <summary>
+        /// Which of the two the box is showing. Kept rather than worked out again,
+        /// because by the time the value is parked the provider or model has
+        /// already changed to the one it is NOT for.
+        /// </summary>
+        private bool _parallelShowsLocal;
+
+        /// <summary>Parks the box's value with the kind it was showing.</summary>
+        private void KeepParallel()
         {
-            if (string.IsNullOrEmpty(provider)) return;
-            if (LlmProviders.TakesEndpoint(provider)) _localParallel = (int)_maxParallel.Value;
+            if (_parallelShowsLocal) _localParallel = (int)_maxParallel.Value;
             else _cloudParallel = (int)_maxParallel.Value;
         }
 
-        private void ShowParallel(string provider)
+        /// <summary>
+        /// Shows the value for the provider and model chosen. An Ollama cloud
+        /// model takes the cloud's (<see cref="LlmProviders.RunsLocally"/>).
+        /// </summary>
+        private void ShowParallel()
         {
-            _maxParallel.Value = LlmProviders.TakesEndpoint(provider) ? _localParallel : _cloudParallel;
+            _parallelShowsLocal = LlmProviders.RunsLocally(CurrentProvider, ChosenModelId());
+            _maxParallel.Value = _parallelShowsLocal ? _localParallel : _cloudParallel;
+        }
+
+        /// <summary>
+        /// A model picked or typed can move the box from one value to the other -
+        /// "qwen2.5:7b" to "gpt-oss:20b-cloud" - so park the one shown first.
+        /// </summary>
+        private void FollowParallel()
+        {
+            if (LlmProviders.RunsLocally(CurrentProvider, ChosenModelId()) == _parallelShowsLocal) return;
+            KeepParallel();
+            ShowParallel();
         }
 
         /// <summary>
@@ -1159,7 +1188,7 @@ namespace Supervertaler.MemoQ.Settings
             SharedSettings.Endpoint = _endpoint.Text.Trim();
             SharedSettings.PromptPath = SelectedPromptPath();
             MemoryBankPicker.Save(MemoryBankPicker.Chosen(_memoryBank));
-            KeepParallel(CurrentProvider);
+            KeepParallel();
             SharedSettings.Parallel = _cloudParallel;
             SharedSettings.LocalParallel = _localParallel;
             SharedSettings.BatchSize = (int)_batchSize.Value;

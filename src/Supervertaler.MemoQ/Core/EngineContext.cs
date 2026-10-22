@@ -156,18 +156,20 @@ namespace Supervertaler.MemoQ.Core
             {
                 var stored = Settings.GeneralSettings ?? new SupervertalerGeneralSettings();
                 var provider = SharedSettings.ProviderOr(stored.Provider);
+                var model = SharedSettings.ModelOr(stored.Model);
 
                 return new SupervertalerGeneralSettings
                 {
                     Provider = provider,
-                    Model = SharedSettings.ModelOr(stored.Model),
+                    Model = model,
                     Endpoint = SharedSettings.EndpointOr(stored.Endpoint),
                     PromptPath = SharedSettings.PromptPathOr(stored.PromptPath),
                     SystemPrompt = SharedSettings.InstructionsOr(stored.SystemPrompt),
                     BatchSize = SharedSettings.BatchSizeOr(stored.BatchSize),
                     // Each kind of provider keeps its own: a local server's one
                     // request at a time must not become the cloud's value too.
-                    MaxParallelRequests = LlmProviders.TakesEndpoint(provider)
+                    // An Ollama cloud model is the cloud's (RunsLocally).
+                    MaxParallelRequests = LlmProviders.RunsLocally(provider, model)
                         ? SharedSettings.LocalParallel
                         : SharedSettings.ParallelOr(stored.MaxParallelRequests),
                     UseTerminologyContext = SharedSettings.UseTerminologyContextOr(stored.UseTerminologyContext),

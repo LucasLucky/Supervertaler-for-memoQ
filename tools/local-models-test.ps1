@@ -663,8 +663,39 @@ foreach ($c in @(
     Check ($got -eq $c[2]) "$($c[0]) '$($c[1])' is $(if ($c[2]) {''} else {'not '})a cloud model"
 }
 
+# Which Parallel requests value and which notice a model gets (2026-10-22). Until
+# then every Ollama model counted as local: a cloud model went one batch at a time
+# under "the model reads the instructions once" (seen 2026-10-14, gemma4:31b-cloud).
+foreach ($c in @(
+        @('Ollama', 'qwen2.5:7b', $true), @('OpenAI-compatible', 'anything', $true),
+        @('Ollama', 'gemma4:31b-cloud', $false), @('Ollama', 'qwen3-coder:cloud', $false),
+        @('Anthropic', 'claude-opus-5-5', $false), @('Ollama', '', $true))) {
+    $got = P 'RunsLocally' @($c[0], $c[1])
+    Check ($got -eq $c[2]) "$($c[0]) '$($c[1])' $(if ($c[2]) {'runs locally'} else {'does not run locally'})"
+}
+
+# And the engine uses it: an Ollama cloud model gets the cloud's value. The shared
+# file decides (run-harness.ps1 snapshots and restores it).
+$sharedT = $plugin.GetType('Supervertaler.MemoQ.Core.SharedSettings')
+$SharedProp = [Reflection.BindingFlags]'NonPublic,Public,Static'
+function Shared($name, $value) { $sharedT.GetProperty($name, $SharedProp).SetValue($null, $value) }
+$genT = $plugin.GetType('Supervertaler.MemoQ.Settings.SupervertalerGeneralSettings')
+$secT = $plugin.GetType('Supervertaler.MemoQ.Settings.SupervertalerSecureSettings')
+$setT = $plugin.GetType('Supervertaler.MemoQ.Settings.SupervertalerSettings')
+$ctxSettings = $setT.GetMethod('Create').Invoke($null, @([Activator]::CreateInstance($genT), [Activator]::CreateInstance($secT)))
+$ctx = [Activator]::CreateInstance($plugin.GetType('Supervertaler.MemoQ.Core.EngineContext'),
+    [Reflection.BindingFlags]'Instance,Public,NonPublic', $null, @($ctxSettings, 'eng', 'nld'), $null)
+function ParallelFor($provider, $model) {
+    Shared 'Provider' $provider; Shared 'Model' $model
+    $ctx.GetType().GetProperty('General').GetValue($ctx).MaxParallelRequests
+}
+Shared 'Parallel' 3; Shared 'LocalParallel' 1
+Check ((ParallelFor 'Ollama' 'gemma4:31b-cloud') -eq 3) "the engine gives an Ollama cloud model the cloud's Parallel requests (3)"
+Check ((ParallelFor 'Ollama' 'qwen2.5:7b') -eq 1) "and a model on this computer the local value (1)"
+Check ((ParallelFor 'Anthropic' 'claude-opus-5-5') -eq 3) "and a cloud provider the cloud's, as before (3)"
+
 $localServer = $plugin.GetType('Supervertaler.MemoQ.Core.LocalServer')
-$tags = '{"models":[{"name":"gpt-oss:20b-cloud","model":"gpt-oss:20b-cloud","remote_model":"gpt-oss:20b","remote_host":"https://ollama.com","size":306},' +
+$tags ='{"models":[{"name":"gpt-oss:20b-cloud","model":"gpt-oss:20b-cloud","remote_model":"gpt-oss:20b","remote_host":"https://ollama.com","size":306},' +
         '{"name":"my-renamed-model:latest","model":"my-renamed-model:latest","remote_host":"https://ollama.com"},' +
         '{"name":"qwen2.5:7b","model":"qwen2.5:7b","size":4683087332}]}'
 function RemoteHost($model) {
@@ -715,6 +746,11 @@ $text = $describe.Invoke($null, @('Ollama', 'qwen2.5:7b', [TimeSpan]::FromSecond
 Check ($text -like '*waiting for Ollama (qwen2.5:7b)*8:47*' -and $text -like '*Reading the instructions: 73% done (10,240 of 13,903 tokens)*about 4 minutes left*') "and the notice says so: $(($text -split "`n")[0..1] -join ' / ')"
 Check ($text -like "*The first translation is the slow one*") "and why, in a translator's words"
 Check ($text -notmatch '\brequest') "with no 'request' in it"
+$cloudText = $describe.Invoke($null, @('Ollama', 'gemma4:31b-cloud', [TimeSpan]::FromSeconds(40), 1, $null, $null, $null))
+Check ($cloudText -like '*waiting for Ollama (gemma4:31b-cloud)*' -and $cloudText -notlike '*The first translation is the slow one*') `
+    "a model on Ollama's servers is not said to be reading the instructions on this computer"
+$localText = $describe.Invoke($null, @('Ollama', 'qwen2.5:7b', [TimeSpan]::FromSeconds(40), 1, $null, $null, $null))
+Check ($localText -like '*The first translation is the slow one*') "a local model with no log to go on still is"
 
 $done = $parse.Invoke($null, @($log + "`nslot print_timing: id  0 | task 9 | prompt eval time =  799400.48 ms / 13900 tokens (   57.51 ms per token,    17.39 tokens per second)"))
 Check ($done.Writing) "a finished prompt is read as writing the answer"
@@ -943,6 +979,7 @@ foreach ($d in $dialogs) {
         $model.SelectedItem = $fetched[0]
         $chosen = $form.GetType().GetMethod('ChosenModelId', $Instance).Invoke($form, @())
         Check ($chosen -eq 'qwen2.5:7b') "$($d.Name): and choosing it sends '$chosen'"
+        Check ($parallel.Value -eq 2) "$($d.Name): a model on this computer keeps the local Parallel requests ($($parallel.Value))"
 
         # Ollama's cloud: allowed, and said - in the list, and under the box.
         $cloudItem = @($model.Items | Where-Object { $_.Id -eq 'gpt-oss:20b-cloud' })
@@ -951,10 +988,19 @@ foreach ($d in $dialogs) {
         Check ($note.Text -like "Cloud model:*" -and $note.ForeColor -eq [Drawing.Color]::Firebrick) "$($d.Name): choosing it puts the warning under the box"
         $chosen = $form.GetType().GetMethod('ChosenModelId', $Instance).Invoke($form, @())
         Check ($chosen -eq 'gpt-oss:20b-cloud') "$($d.Name): and it can still be chosen ('$chosen')"
+        Check ($parallel.Value -eq 5) "$($d.Name): a cloud model shows the cloud's Parallel requests ($($parallel.Value)), not the local 2"
+        $parallel.Value = 7
         $model.Text = 'qwen3-coder:cloud'
         Check ($note.Text -like "Cloud model:*") "$($d.Name): a typed ':cloud' model is warned about too"
+        Check ($parallel.Value -eq 7) "$($d.Name): another cloud model keeps the value just set ($($parallel.Value))"
         $model.Text = 'qwen2.5:7b'
         Check ($note.Text -notlike "Cloud model:*") "$($d.Name): a local model takes the warning away ('$($note.Text)')"
+        Check ($parallel.Value -eq 2 -and (Field $form '_cloudParallel') -eq 7) `
+            "$($d.Name): back on a local model, the local value ($($parallel.Value)), with the cloud's 7 parked"
+        $model.Text = 'gpt-oss:20b-cloud'
+        Check ($parallel.Value -eq 7) "$($d.Name): and the cloud model brings the 7 back ($($parallel.Value))"
+        $parallel.Value = 5
+        $model.Text = 'qwen2.5:7b'
         $w = [Windows.Forms.TextRenderer]::MeasureText('Cloud model: your text goes to Ollama''s servers, not this computer.', $note.Font).Width
         Check ($w -le $note.Width) "$($d.Name): the warning fits ($w of $($note.Width) px)"
         (Field $form '_showAllModels').Checked = $false

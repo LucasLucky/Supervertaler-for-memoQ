@@ -497,8 +497,10 @@ namespace Supervertaler.MemoQ.Core
                     : " more translations are waiting their turn.");
             }
 
-            // Why it is slow - only while it is, or when there is no telling.
-            if (stillReading || !known)
+            // Why it is slow - only while it is, or when there is no telling. Never
+            // for a model on Ollama's servers: nothing is read on this computer,
+            // and there is never any telling, because there is no log to read.
+            if ((stillReading || !known) && LlmProviders.RunsLocally(provider, model))
             {
                 text.AppendLine();
                 text.Append("The first translation is the slow one: the model reads the instructions once and then "

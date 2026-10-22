@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Fixed
+
+- **Ollama's cloud models are no longer treated as models on your own computer.** A model that runs on Ollama's servers – one whose name ends in *-cloud* or *:cloud*, such as gemma4:31b-cloud – used the *Parallel requests* value for local servers, usually 1, so Pre-translate sent its batches one at a time. The waiting notice also said the first translation was slow because the model was reading the instructions, which happens on your own computer, not on Ollama's servers. A cloud model now uses the value for cloud providers, and the settings show that value while a cloud model is chosen and switch back for a local one, keeping both. The notice no longer gives that reason for a cloud model.
+
 ## [0.1.23] – 2026-10-22
 
 ### Fixed

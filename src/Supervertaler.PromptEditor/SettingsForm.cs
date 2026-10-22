@@ -114,14 +114,15 @@ namespace Supervertaler.PromptEditor
             {
                 if (_loading) return;
                 RememberTypedKey();
-                KeepParallel(_lastProvider);
+                KeepParallel();
                 _lastProvider = Provider;
                 _modelId = "";
 
-                ShowParallel(Provider);
                 ShowForProvider();
                 ShowKeyFor(Provider);
                 ShowModels();
+                // After the models: which value applies depends on the model too.
+                ShowParallel();
             };
             Controls.Add(_provider);
             y += rowH;
@@ -140,8 +141,14 @@ namespace Supervertaler.PromptEditor
                 if (_model.SelectedItem is ModelCatalog.Entry entry) _modelId = entry.Id;
             };
 
-            // Picked or typed, a cloud model is said to be one at once.
-            _model.TextChanged += (s, e) => { if (!_loading) ShowCloudWarning(); };
+            // Picked or typed, a cloud model is said to be one at once, and takes
+            // the cloud's Parallel requests.
+            _model.TextChanged += (s, e) =>
+            {
+                if (_loading) return;
+                ShowCloudWarning();
+                FollowParallel();
+            };
             Controls.Add(_model);
             y += rowH;
 
@@ -424,17 +431,39 @@ namespace Supervertaler.PromptEditor
         private int _cloudParallel = 4;
         private int _localParallel = 1;
 
-        /// <summary>Parks the box's value with the kind of provider it was showing.</summary>
-        private void KeepParallel(string provider)
+        /// <summary>
+        /// Which of the two the box is showing. Kept rather than worked out again,
+        /// because by the time the value is parked the provider or model has
+        /// already changed to the one it is NOT for.
+        /// </summary>
+        private bool _parallelShowsLocal;
+
+        /// <summary>Parks the box's value with the kind it was showing.</summary>
+        private void KeepParallel()
         {
-            if (string.IsNullOrEmpty(provider)) return;
-            if (LlmProviders.TakesEndpoint(provider)) _localParallel = (int)_parallel.Value;
+            if (_parallelShowsLocal) _localParallel = (int)_parallel.Value;
             else _cloudParallel = (int)_parallel.Value;
         }
 
-        private void ShowParallel(string provider)
+        /// <summary>
+        /// Shows the value for the provider and model chosen. An Ollama cloud
+        /// model takes the cloud's (<see cref="LlmProviders.RunsLocally"/>).
+        /// </summary>
+        private void ShowParallel()
         {
-            _parallel.Value = LlmProviders.TakesEndpoint(provider) ? _localParallel : _cloudParallel;
+            _parallelShowsLocal = LlmProviders.RunsLocally(Provider, ChosenModelId());
+            _parallel.Value = _parallelShowsLocal ? _localParallel : _cloudParallel;
+        }
+
+        /// <summary>
+        /// A model picked or typed can move the box from one value to the other -
+        /// "qwen2.5:7b" to "gpt-oss:20b-cloud" - so park the one shown first.
+        /// </summary>
+        private void FollowParallel()
+        {
+            if (LlmProviders.RunsLocally(Provider, ChosenModelId()) == _parallelShowsLocal) return;
+            KeepParallel();
+            ShowParallel();
         }
 
         /// <summary>
@@ -677,7 +706,7 @@ namespace Supervertaler.PromptEditor
             _endpoint.Text = SharedSettings.EndpointOr(string.Empty);
             _cloudParallel = Math.Max(1, Math.Min(16, SharedSettings.ParallelOr(4)));
             _localParallel = Math.Max(1, Math.Min(16, SharedSettings.LocalParallel));
-            ShowParallel(Provider);
+            ShowParallel();
             _batchSize.Value = Math.Max(1, Math.Min(100, SharedSettings.BatchSizeOr(20)));
             _useTerminology.Checked = SharedSettings.UseTerminologyContextOr(true);
             _useDocumentContext.Checked = SharedSettings.UseDocumentContextOr(true);
@@ -702,7 +731,7 @@ namespace Supervertaler.PromptEditor
             SharedSettings.Provider = (_provider.SelectedItem as string) ?? LlmProviders.Anthropic;
             SharedSettings.Model = ChosenModelId();
             SharedSettings.Endpoint = _endpoint.Text.Trim();
-            KeepParallel(Provider);
+            KeepParallel();
             SharedSettings.Parallel = _cloudParallel;
             SharedSettings.LocalParallel = _localParallel;
             SharedSettings.BatchSize = (int)_batchSize.Value;
