@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Fixed
+
+- **Gemini 3.8 Flash and Gemini 3.1 Pro no longer bill for hidden thinking on every request.** Gemini models think before they answer, and Google charges that thinking at the same rate as the answer, although you never see it. Supervertaler had switched the thinking down for the 3.5 models only, so 3.8 Flash and 3.1 Pro thought as much as Google's defaults allow. In a test with one short sentence, 3.8 Flash charged for 718 thinking tokens on top of a 21-token translation – about $2.80 per 1,000 sentences, where the translations themselves come to about 8 cents. Each model now thinks as little as it is allowed to. 3.8 Flash charged nothing for thinking in the same test, so the cost fell to those 8 cents; 3.1 Pro cannot go below its Low setting and still thinks, but it about halves, from 1,070 thinking tokens (roughly $13 per 1,000 sentences) to 524 (roughly $7). Real segments vary, and a longer or harder passage thinks for longer. The temperature is unchanged. This covers every request Supervertaler sends to these models from memoQ: Pre-translate, translations of the segment you are on, and AutoPrompt.
+
 ## [0.1.21] – 2026-10-17
 
 ### Changed
