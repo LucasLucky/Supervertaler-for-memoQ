@@ -135,13 +135,22 @@ namespace Supervertaler.MemoQ.Core
                 {
                     if (doc.Sources.Count < MaxSourcesPerDocument)
                         doc.Sources.Add(taggedSource);
-
-                // Outside the cap deliberately: a row's state is worth knowing
-                // even once the source list is full, and it costs one entry.
-                if (status.HasValue) doc.StatusBySource[taggedSource] = status.Value;
                     else
                         doc.Seen.Remove(taggedSource);
                 }
+
+                // Outside the cap deliberately: a row's state is worth knowing
+                // even once the source list is full, and it costs one entry.
+                // Outside the Seen check too, so the latest state memoQ reports
+                // for a row replaces an earlier one.
+                //
+                // From 2026-09-20 to 2026-10-22 this line sat between the cap check
+                // and its else, which then belonged to it: every row recorded
+                // without a state (each one the model translated on its own, a
+                // click into a row among them) was forgotten as seen and added
+                // again next time, so get_segments and the captured document
+                // listed it twice.
+                if (status.HasValue) doc.StatusBySource[taggedSource] = status.Value;
             }
         }
 

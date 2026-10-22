@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Fixed
+
+- **Claude Desktop no longer sees some segments twice.** Since 0.1.0, a segment the model had translated on its own – each one you clicked into, for example – was added again to the list Claude Desktop reads every time it came up, so that list, and the document text AutoPrompt can work from, could repeat it.
+
 ## [0.1.22] – 2026-10-22
 
 ### Fixed
