@@ -49,7 +49,8 @@ namespace Supervertaler.MemoQ.Core
             string instructions = null,
             string kbContext = null,
             StructureContextMode structure = StructureContextMode.Off,
-            string structureMarker = null)
+            string structureMarker = null,
+            string documentContext = null)
         {
             // `instructions` is the resolved prompt — a library prompt when one is
             // selected, otherwise the settings' own text. The settings fallback
@@ -86,6 +87,17 @@ namespace Supervertaler.MemoQ.Core
             if (!string.IsNullOrWhiteSpace(kbContext))
             {
                 system = system + Environment.NewLine + Environment.NewLine + kbContext.Trim();
+            }
+
+            // The document's source text after the bank, where Trados puts it:
+            // both are standing background for the whole job. The same text for
+            // every request until the document has doubled (see
+            // EngineContext.DocumentContextBlock), so it sits inside the cached
+            // prefix with them - one changed byte here and every request pays
+            // the write rate for the prompt and the bank as well.
+            if (!string.IsNullOrWhiteSpace(documentContext))
+            {
+                system = system + Environment.NewLine + Environment.NewLine + documentContext.Trim();
             }
 
             // Last, after the prompt and the bank, so no prompt can switch it off
@@ -157,8 +169,8 @@ namespace Supervertaler.MemoQ.Core
         /// <summary>
         /// A batch request, split by what changes.
         ///
-        /// <para><see cref="BuiltPrompt.System"/> is the instructions and the
-        /// memory bank: the same text for every request in a job. <see
+        /// <para><see cref="BuiltPrompt.System"/> is the instructions, the memory
+        /// bank and the document: the same text for every request in a job. <see
         /// cref="BuiltPrompt.User"/> is everything that varies with the batch —
         /// project metadata, the pairs recalled for these segments, the
         /// terminology matched in them — which the caller puts in front of the
@@ -181,13 +193,14 @@ namespace Supervertaler.MemoQ.Core
             IReadOnlyList<TermIndex.Match> ownTerms,
             string instructions,
             string kbContext = null,
-            StructureContextMode structure = StructureContextMode.Off)
+            StructureContextMode structure = StructureContextMode.Off,
+            string documentContext = null)
         {
             // No marker: a batch carries its own segments, each already prefixed
             // by the caller, and the placeholder segment here is dropped below.
             var built = Build(new TranslationBundle { Source = SegmentBuilder.CreateFromString(" ") },
                 settings, sourceLangCode, targetLangCode, metadata, recalled, ownTerms, instructions,
-                kbContext, structure);
+                kbContext, structure, documentContext: documentContext);
 
             // Build appends a "Source segment:" trailer; a batch supplies its own
             // segments, so drop it.

@@ -323,6 +323,42 @@ already uses is the right one and stays; when that endpoint ships, it becomes an
 additional source of the same terms, not a replacement for the termbase system.
 
 
+## The document in every request (added 2026-10-23)
+
+Trados's Batch Translate has always sent the document; memoQ now does too. The
+design and its costs are in `docs/design/whole-document-context.md`.
+
+- `Core/DocumentContext.cs` builds the block (pure functions);
+  `EngineContext.DocumentContextBlock` decides whether to send it and keeps it
+  between rebuilds. It goes in the **system** half, after the memory bank and
+  before `OutputContract`, under core's `# DOCUMENT CONTENT` heading and wording
+  (copied, since core does not expose it on its own).
+- **Source:** the live link's paragraphs when it has the document (all of it,
+  from the first request), else `CaptureStore`'s rows. Only for a document memoQ
+  has named: the `nodoc_` bucket can mix documents.
+- **Byte stability is the whole design.** The block is rebuilt only when the
+  text crosses a doubling (`DocumentContext.Step`, measured as the bank measures
+  it so the two move together). Captured rows are cut at the doubling point
+  (`CapturedPrefix`) rather than "whatever has arrived", so memoQ's two engines
+  per pair build the same bytes at any moment. The price: without the live link
+  the block holds 50-100% of what was captured.
+- Limits: 100,000 characters (~25,000 tokens), or 800,000 with the
+  `documentcontext.whole` key ("Send long documents whole"). Past them, the
+  first 80% and last 20%, counted as the lines are written, numbers included.
+- **Never for `LlmProviders.TakesEndpoint` providers** (Ollama, including its
+  cloud models, and OpenAI-compatible): CPU re-read time and small windows.
+- Governed by `usedocumentcontext` ("Send the document, confirmed segments and
+  project metadata"). The long-document box is greyed out when that is off or
+  the provider is local.
+- `PromptBuilder.Build` and `BuildForBatch` gained a last parameter,
+  `documentContext`. Eight harnesses call them by reflection with every
+  argument spelled out; a new parameter means adding one to each.
+- `tools/document-context-test.ps1` simulates runs (captured and live, two
+  engines) and checks the system prompt is identical between doublings. It
+  passes the settings in rather than writing `shared.txt`, so it is safe while
+  memoQ is open. The harnesses it touched now find the DLL relative to their own
+  folder, so they test a worktree's build rather than the main checkout's.
+
 ## Reading memoQ's own data off disk
 
 Surveyed 2026-08-31, because AutoPrompt needs project context the MT SDK does not

@@ -738,6 +738,139 @@ namespace Supervertaler.MemoQ.Core
             return string.IsNullOrWhiteSpace(best) ? null : best;
         }
 
+        // -- the document's contribution to a prompt ----------------------------
+
+        // The document block, and what it was built from (see DocumentContextBlock).
+        private readonly object _docLock = new object();
+        private string _docBlock;
+        private string _docBlockKey;
+        private bool _saidDocumentLocal;
+
+        /// <summary>
+        /// The document's source text for the system half of every request, or
+        /// null when it is not to be sent. See DocumentContext and
+        /// docs/design/whole-document-context.md.
+        ///
+        /// <para>Not sent when "Send the document, confirmed segments and project
+        /// metadata" is off, and never to a server of the translator's own: on a
+        /// computer without a graphics card 25,000 more tokens are about 25
+        /// minutes before the first segment, and many local models cannot hold
+        /// them at all. Ollama's cloud models go through the same local Ollama
+        /// and are treated the same.</para>
+        ///
+        /// <para>Rebuilt only when the document has doubled, or when the
+        /// document, where its text comes from or the long-document box changes.
+        /// A rebuild changes the system prompt and costs a cache write, so a job
+        /// gets a handful. In between, the same string comes back, which is what
+        /// keeps the cached half identical from one request to the next.</para>
+        /// </summary>
+        public string DocumentContextBlock()
+        {
+            var general = General;
+            return DocumentContextBlock(general.UseDocumentContext, general.Provider, SharedSettings.SendWholeDocument);
+        }
+
+        /// <summary>
+        /// The same, with the three settings it depends on given rather than
+        /// read. For the harness (tools/document-context-test.ps1), which must
+        /// never write the settings file memoQ is reading.
+        /// </summary>
+        internal string DocumentContextBlock(bool send, string provider, bool whole)
+        {
+            if (!send) return null;
+
+            if (LlmProviders.TakesEndpoint(provider))
+            {
+                SayDocumentNotSentLocallyOnce();
+                return null;
+            }
+
+            var rows = DocumentRows(out var documentId, out var liveLink);
+            if (rows == null) return null;
+
+            var key = string.Join("|", documentId, liveLink ? "live" : "captured",
+                                  DocumentContext.Step(DocumentContext.Measure(rows)), whole ? "whole" : "normal");
+
+            lock (_docLock)
+            {
+                if (string.Equals(key, _docBlockKey, StringComparison.Ordinal)) return _docBlock;
+
+                var built = DocumentContext.Build(rows, liveLink, whole ? DocumentContext.WholeChars : DocumentContext.NormalChars);
+                _docBlock = built?.Text;
+                _docBlockKey = key;
+                _saidDocumentLocal = false;
+
+                if (built != null) PluginLog.Write(DescribeDocumentBlock(built, liveLink, whole));
+                return _docBlock;
+            }
+        }
+
+        /// <summary>
+        /// The rows to build the document block from, raw as each source holds
+        /// them: the live link's paragraphs when it has this document - all of
+        /// it, in order - and memoQ's captured segments otherwise. Null for a
+        /// document memoQ has not named: its rows share one bucket per language
+        /// pair, which can mix documents.
+        /// </summary>
+        private List<string> DocumentRows(out string documentId, out bool liveLink)
+        {
+            liveLink = false;
+            documentId = null;
+
+            var id = CurrentDocument;
+            if (id == Guid.Empty) return null;
+            documentId = id.ToString("N");
+
+            try
+            {
+                var parts = PreviewStore.Rows(id);
+                if (parts.Count > 0)
+                {
+                    liveLink = true;
+                    return parts.Select(p => p.Source ?? string.Empty).ToList();
+                }
+            }
+            catch { /* the live link is optional */ }
+
+            // A copy, taken under the store's lock: memoQ's other threads go on
+            // adding to the original while this one reads.
+            var capture = CaptureStore.Get(MemoryKey);
+            return capture == null || capture.Sources.Count == 0 ? null : capture.Sources;
+        }
+
+        /// <summary>Said once per rebuild, which by design is rare: what the model is shown of the document.</summary>
+        private static string DescribeDocumentBlock(DocumentContext.Result built, bool liveLink, bool whole)
+        {
+            var tokens = (built.Text.Length / 4).ToString("N0");
+            var line = liveLink
+                ? "Document context: sending the document from the live link - " + built.Sent + " of " + built.Available + " paragraphs"
+                : "Document context: sending " + built.Sent + " of " + built.Available + " captured segments, from the start "
+                  + "of the document (the live link does not have this document, so the model sees what memoQ has sent so far)";
+            line += ", about " + tokens + " tokens";
+
+            if (built.Omitted > 0)
+                line += " - " + built.Omitted + " left out in the middle; the limit is about "
+                      + (whole ? "200,000 tokens" : "25,000 tokens, raised by \"Send long documents whole\" in the settings");
+            return line;
+        }
+
+        private void SayDocumentNotSentLocallyOnce()
+        {
+            lock (_docLock)
+            {
+                if (_saidDocumentLocal) return;
+                _saidDocumentLocal = true;
+
+                // Forgotten, so going back to a cloud provider announces the block again.
+                _docBlock = null;
+                _docBlockKey = null;
+            }
+
+            PluginLog.Write("Document context: not sent to a local model (Ollama or an OpenAI-compatible server). "
+                + "Reading the whole document would add many minutes to the first request on most computers, and "
+                + "many local models cannot hold it. Confirmed segments and project metadata still go.");
+        }
+
         /// <summary>How many extract files are kept - one per document ever translated would grow forever.</summary>
         internal const int KeepExtracts = 200;
 

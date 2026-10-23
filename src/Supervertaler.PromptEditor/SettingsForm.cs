@@ -35,6 +35,7 @@ namespace Supervertaler.PromptEditor
         private readonly NumericUpDown _batchSize = new NumericUpDown();
         private readonly CheckBox _useTerminology = new CheckBox();
         private readonly CheckBox _useDocumentContext = new CheckBox();
+        private readonly CheckBox _sendWholeDocument = new CheckBox();
         private readonly CheckBox _sendMemoryBank = new CheckBox();
         private readonly CheckBox _bridgeMode = new CheckBox();
         private readonly CheckBox _usageStats = new CheckBox();
@@ -247,9 +248,17 @@ namespace Supervertaler.PromptEditor
             Controls.Add(_useTerminology);
             y += 26;
 
-            _useDocumentContext.Text = "Send surrounding segments and project metadata to the model";
+            _useDocumentContext.Text = "Send the document, confirmed segments and project metadata to the model";
             _useDocumentContext.Left = fieldX; _useDocumentContext.Top = y; _useDocumentContext.Width = fieldW;
+            _useDocumentContext.CheckedChanged += (s, e) => ShowWholeDocumentState();
             Controls.Add(_useDocumentContext);
+            y += 26;
+
+            // Under the box it depends on, indented to say so. Off by default:
+            // every lookup then carries the whole document.
+            _sendWholeDocument.Text = "Send long documents whole (up to about 130,000 words; costs more)";
+            _sendWholeDocument.Left = fieldX + 18; _sendWholeDocument.Top = y; _sendWholeDocument.Width = fieldW - 18;
+            Controls.Add(_sendWholeDocument);
             y += 26;
 
             // Which bank is chosen per job, on the panel; whether one is sent at
@@ -275,15 +284,22 @@ namespace Supervertaler.PromptEditor
             var widest = 0;
             foreach (var box in boxes)
             {
-                // + 24 for the tick and the gap between it and the text.
-                var needed = TextRenderer.MeasureText(box.Text, box.Font).Width + 24;
+                // Asked of the box, tick and gap included. The text's width plus
+                // 24 came out 6 pixels short of it, which clipped whichever line
+                // was the longest.
+                var needed = box.PreferredSize.Width;
                 if (needed > widest) widest = needed;
             }
+
+            // The indented box is measured with its indent.
+            var wholeNeeded = _sendWholeDocument.PreferredSize.Width + 18;
+            if (wholeNeeded > widest) widest = wholeNeeded;
 
             if (fieldX + widest + 16 > ClientSize.Width)
                 ClientSize = new Size(fieldX + widest + 16, ClientSize.Height);
 
             foreach (var box in boxes) box.Width = widest;
+            _sendWholeDocument.Width = widest - 18;
             y += 24;
             Hint("Pre-translate then only hands the segments to the chat and inserts the translations it "
                 + "sends back. Suggestions as you move through segments still use the API key.", fieldX, fieldW);
@@ -649,6 +665,17 @@ namespace Supervertaler.PromptEditor
             _endpoint.Enabled = LlmProviders.TakesEndpoint(Provider);
             _endpointHint.Text = ProviderText.EndpointHint(Provider);
             _apiKey.Enabled = !string.Equals(Provider, LlmProviders.Ollama, StringComparison.OrdinalIgnoreCase);
+            ShowWholeDocumentState();
+        }
+
+        /// <summary>
+        /// The long-document box means something only while the document is sent
+        /// at all, and never for a local model, which gets no document. Greyed out,
+        /// not cleared: the choice comes back with the provider.
+        /// </summary>
+        private void ShowWholeDocumentState()
+        {
+            _sendWholeDocument.Enabled = _useDocumentContext.Checked && !LlmProviders.TakesEndpoint(Provider);
         }
 
         /// <summary>
@@ -710,6 +737,7 @@ namespace Supervertaler.PromptEditor
             _batchSize.Value = Math.Max(1, Math.Min(100, SharedSettings.BatchSizeOr(20)));
             _useTerminology.Checked = SharedSettings.UseTerminologyContextOr(true);
             _useDocumentContext.Checked = SharedSettings.UseDocumentContextOr(true);
+            _sendWholeDocument.Checked = SharedSettings.SendWholeDocument;
             _sendMemoryBank.Checked = SharedSettings.SendMemoryBank;
             _bridgeMode.Checked = SharedSettings.BridgeMode;
             _usageStats.Checked = SharedSettings.UsageStats;
@@ -737,6 +765,7 @@ namespace Supervertaler.PromptEditor
             SharedSettings.BatchSize = (int)_batchSize.Value;
             SharedSettings.UseTerminologyContext = _useTerminology.Checked;
             SharedSettings.UseDocumentContext = _useDocumentContext.Checked;
+            SharedSettings.SendWholeDocument = _sendWholeDocument.Checked;
             SharedSettings.SendMemoryBank = _sendMemoryBank.Checked;
             SharedSettings.BridgeMode = _bridgeMode.Checked;
             SharedSettings.ShowAllModels = _showAllModels.Checked;

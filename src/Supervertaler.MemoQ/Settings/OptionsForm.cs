@@ -46,6 +46,7 @@ namespace Supervertaler.MemoQ.Settings
         private Label _memoryBankNote;
         private readonly CheckBox _useTerminology = new CheckBox();
         private readonly CheckBox _useDocumentContext = new CheckBox();
+        private readonly CheckBox _sendWholeDocument = new CheckBox();
         private readonly CheckBox _sendMemoryBank = new CheckBox();
         private readonly CheckBox _bridgeMode = new CheckBox();
         private readonly CheckBox _quickTerm = new CheckBox();
@@ -260,9 +261,17 @@ namespace Supervertaler.MemoQ.Settings
             Controls.Add(_useTerminology);
             y += 24;
 
-            _useDocumentContext.Text = "Send surrounding segments and project metadata to the model";
+            _useDocumentContext.Text = "Send the document, confirmed segments and project metadata to the model";
             _useDocumentContext.Left = fieldX; _useDocumentContext.Top = y; _useDocumentContext.AutoSize = true;
+            _useDocumentContext.CheckedChanged += (s, e) => ShowWholeDocumentState();
             Controls.Add(_useDocumentContext);
+            y += 24;
+
+            // Under the box it depends on, indented to say so. Off by default:
+            // every lookup then carries the whole document (DocumentContext).
+            _sendWholeDocument.Text = "Send long documents whole (up to about 130,000 words; costs more)";
+            _sendWholeDocument.Left = fieldX + 18; _sendWholeDocument.Top = y; _sendWholeDocument.AutoSize = true;
+            Controls.Add(_sendWholeDocument);
             y += 24;
 
             _sendMemoryBank.Text = "Send the memory bank to the model";
@@ -508,6 +517,8 @@ namespace Supervertaler.MemoQ.Settings
             _batchSize.Value = Math.Max(1, Math.Min(100, SharedSettings.BatchSizeOr(g.BatchSize)));
             _useTerminology.Checked = SharedSettings.UseTerminologyContextOr(g.UseTerminologyContext);
             _useDocumentContext.Checked = SharedSettings.UseDocumentContextOr(g.UseDocumentContext);
+            _sendWholeDocument.Checked = SharedSettings.SendWholeDocument;
+            ShowWholeDocumentState();
             _sendMemoryBank.Checked = SharedSettings.SendMemoryBank;
             _bridgeMode.Checked = SharedSettings.BridgeModeOr(g.BridgeMode);
             _quickTerm.Checked = SharedSettings.QuickTermHotkey;
@@ -961,7 +972,18 @@ namespace Supervertaler.MemoQ.Settings
             _apiKey.Enabled = !ollama;
             if (ollama) _apiKey.Text = string.Empty;
 
+            ShowWholeDocumentState();
             ShowKeyShape();
+        }
+
+        /// <summary>
+        /// The long-document box means something only while the document is sent
+        /// at all, and never for a local model, which gets no document. Greyed out,
+        /// not cleared: the choice comes back with the provider.
+        /// </summary>
+        private void ShowWholeDocumentState()
+        {
+            _sendWholeDocument.Enabled = _useDocumentContext.Checked && !LlmProviders.TakesEndpoint(CurrentProvider);
         }
 
         /// <summary>
@@ -1194,6 +1216,7 @@ namespace Supervertaler.MemoQ.Settings
             SharedSettings.BatchSize = (int)_batchSize.Value;
             SharedSettings.UseTerminologyContext = _useTerminology.Checked;
             SharedSettings.UseDocumentContext = _useDocumentContext.Checked;
+            SharedSettings.SendWholeDocument = _sendWholeDocument.Checked;
             SharedSettings.SendMemoryBank = _sendMemoryBank.Checked;
             SharedSettings.BridgeMode = _bridgeMode.Checked;
             SharedSettings.QuickTermHotkey = _quickTerm.Checked;

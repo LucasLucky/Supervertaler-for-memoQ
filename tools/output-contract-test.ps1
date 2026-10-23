@@ -28,7 +28,7 @@ $script:probed = @{}
 
 $common = [Reflection.Assembly]::LoadFrom("$memoq\MemoQ.Addins.Common.dll")
 $mt     = [Reflection.Assembly]::LoadFrom("$memoq\MemoQ.MTInterfaces.dll")
-$plugin = [Reflection.Assembly]::LoadFrom('D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll')
+$plugin = [Reflection.Assembly]::LoadFrom("$(Split-Path -Parent $PSScriptRoot)\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll")
 $Static = [Reflection.BindingFlags]'Public,NonPublic,Static'
 
 $fails = 0
@@ -101,7 +101,7 @@ foreach ($case in @(
         @{ Name = 'a library prompt with a bank'; Instructions = 'PROMPT-TEXT'; Bank = 'BANK-TEXT' },
         @{ Name = 'a prompt with no bank';        Instructions = 'PROMPT-TEXT'; Bank = $null },
         @{ Name = 'no prompt at all (settings default)'; Instructions = $null; Bank = $null })) {
-    $built  = $batch.Invoke($null, [object[]]@($settings, 'eng', 'nld', $null, $null, $null, $case.Instructions, $case.Bank, $off))
+    $built  = $batch.Invoke($null, [object[]]@($settings, 'eng', 'nld', $null, $null, $null, $case.Instructions, $case.Bank, $off, $null))
     $system = [string]$built.GetType().GetProperty('System').GetValue($built)
     Check ($system.TrimEnd().EndsWith($text.TrimEnd())) "the system prompt ends with the contract: $($case.Name)"
     if ($case.Bank) {

@@ -6,6 +6,17 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Added
+
+- ★ **The model now sees the whole document, as it does in Supervertaler for Trados.** Every request to a cloud model (Anthropic, OpenAI, Google) now carries the document's source text, so the model can tell what kind of document it is translating and keep its terminology and register consistent from start to finish. Until now it saw only the segments it was asked to translate, a few you had already confirmed, and the project's client, domain and subject. With the live document link connected, the model has the whole document from the first segment; without it, it sees the start of the document, at least half of what memoQ has sent so far. Up to about 25,000 tokens are sent (roughly 15,000 to 18,000 words). A longer document is shortened the way Trados shortens it: the first 80% of that allowance from the start, the last 20% from the end, so a patent's claims stay in. The text goes in the part of the request the provider caches, so after the first request it is read at a tenth of the normal rate on Claude: on a patent of about 570 segments, a Pre-translate costs about 27 cents more on Claude Sonnet 5.5, and working through it segment by segment about 0.4 of a cent more per segment. Not sent to Ollama or an OpenAI-compatible server: on a computer without a graphics card it would add many minutes to the first segment, and many local models cannot hold it.
+- **A new box, *Send long documents whole*, for much longer jobs.** Off by default. Ticked, up to about 200,000 tokens of the document are sent (about 130,000 words) instead of 25,000. Every lookup then carries the whole document, which on a long job comes to about 2 cents a lookup on Claude Sonnet 5.5, so it is for jobs where the model needs to see all of it. It is greyed out for local models, and when the box above it is unticked.
+
+### Changed
+
+- **The box *Send surrounding segments and project metadata to the model* is now *Send the document, confirmed segments and project metadata to the model*.** It always covered the confirmed segments, and it now also governs the document text above. It stays on by default, so after updating, a cloud model receives the document unless you untick it.
+
 ## [0.1.24] – 2026-10-22
 
 ### Fixed
