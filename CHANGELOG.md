@@ -6,6 +6,16 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Added
+
+- **The shared memory bank is there from the start.** The shared bank, `_shared`, holds your house defaults – the terms and style rules that apply whatever the client – and goes with every request, under whichever client bank is chosen. Nothing used to create it, so you had to know it was a folder to make in File Explorer. memoQ and the editor now make it when it is missing, with a starting brief, terminology table and style guide, and it is at the top of the editor's list of memory banks. It sends nothing to the model until you write something in it, and a shared bank you already have is left exactly as it is.
+
+### Fixed
+
+- **New memory bank no longer turns `_shared` into `shared`.** The leading underscore was removed, which made an ordinary bank called "shared" that was never sent as the shared one, with nothing to say so. Reusing an existing bank under different capitals also no longer sends its newly added, still empty files to the model.
+
 ## [0.1.25] – 2026-10-23
 
 ### Added

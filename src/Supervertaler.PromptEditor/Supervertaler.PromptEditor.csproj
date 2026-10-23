@@ -144,6 +144,9 @@
     <Compile Include="..\Supervertaler.MemoQ\Core\DefaultPrompts.cs">
       <Link>Shared\DefaultPrompts.cs</Link>
     </Compile>
+    <Compile Include="..\Supervertaler.MemoQ\Core\BankFolder.cs">
+      <Link>Shared\BankFolder.cs</Link>
+    </Compile>
     <Compile Include="..\Supervertaler.MemoQ\Core\MemoryBankChoice.cs">
       <Link>Shared\MemoryBankChoice.cs</Link>
     </Compile>

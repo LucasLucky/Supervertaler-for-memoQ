@@ -2736,6 +2736,17 @@ namespace Supervertaler.PromptEditor
             var chosen = choice.Create ? NewMemoryBank.Ask(this) : choice.Name;
             if (chosen == null) return;
 
+            // Someone who typed _shared gets the shared bank, which goes with
+            // every request already. Recording it as this project's bank would
+            // take the place of the client bank it is meant to sit under.
+            if (Supervertaler.Core.MemoryBanks.IsSharedName(chosen))
+            {
+                LoadTree();
+                _status.Text = chosen + " is the shared bank. It goes with every request, under whichever "
+                    + "bank is chosen, so it is not chosen for a project.";
+                return;
+            }
+
             MemoryBankPicker.Save(chosen);
             RefreshMemoryBank();
             RefreshProject();

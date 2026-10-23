@@ -74,6 +74,10 @@ namespace Supervertaler.MemoQ
             // work, and memoQ's start must not wait on it.
             System.Threading.Tasks.Task.Run(() => Core.DefaultPrompts.Ensure(PluginLog.Write));
 
+            // The shared memory bank, so nobody has to make the folder by hand
+            // (see BankFolder). Also file work, also in the background.
+            System.Threading.Tasks.Task.Run(() => Core.BankFolder.EnsureShared(PluginLog.Write));
+
             // The live document link, started once so nobody has to find it in
             // Program Files (see LiveLink). Also in the background.
             System.Threading.Tasks.Task.Run(() => Core.LiveLink.StartOnce(PluginLog.Write));
