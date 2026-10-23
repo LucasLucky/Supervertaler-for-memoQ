@@ -1164,6 +1164,40 @@ under a harness.
   per fingerprint, because the trial is one per computer across both plugins,
   plus a `products` list.
 
+## MT marks: what memoQ keeps, and Remove MT marks (measured 2026-10-23)
+
+A prospect asked how to stop memoQ showing "machine translation from MT /
+Supervertaler" in the Review pane. Michael's position: a post-edited MT row is the
+translator's own work, and the mark is theirs to remove (the Trados Batch
+Anonymizer on the RWS AppStore does the same for SDLXLIFF).
+
+- **The mark is memoQ's, not ours.** Every MT hit inserted into a row is stored as
+  `<mq:insertedmatch matchtype="1" source="MT / <FriendlyName>">`; in memoQ 12 it
+  nests the MT output itself. It survives editing and confirming, and retyping a
+  row by hand does not clear it. A TM hit is `matchtype="0" source="<TM name> / "`
+  plus `mq:percent` on the trans-unit. A typed row has no insertedmatch at all.
+  Every engine is marked the same way (DeepL, Google, `MemoQAGT` without the
+  prefix), and the SDLXLIFF converter maps the record to Trados origins.
+- **Importing a cleaned file as an UPDATE does not work.** memoQ takes the statuses
+  from the file but keeps the old insertedmatch, and adds a history version that
+  holds it. **Removing the document and importing the cleaned file AS NEW** works,
+  and keeps the document id and every segmentguid.
+- **Writing an empty export's targets and importing it as an update** gives rows
+  identical to typed ones, with no deletion needed. This is the basis for the
+  editor translating a file itself (route B), which also works in server projects.
+- **A rewritten .mqxlz needs fresh zip headers.** memoQ writes a Zip64 extra field
+  holding each entry's sizes, and its reader (SharpZipLib) believes it, so an entry
+  that keeps its old header is refused with "Size mismatch between central header
+  and local header". `MtMarks` writes every entry anew with .NET's ZipArchive;
+  `tools/mt-marks-test.ps1` reads the result with memoQ's own SharpZipLib.
+- `src/Supervertaler.PromptEditor/MtMarks.cs` removes every matchtype-1 record,
+  from rows and from their earlier versions, and turns `MachineTranslated` into
+  `PartiallyEdited` where it removed one. It edits the file as text, never through
+  an XML serializer, and writes a `(clean)` copy beside the original.
+- The Python test kit (`tools/mt-mark-test/`) and its results stayed out of git.
+  `tools/fixtures/memoq-export-with-mt.mqxlz` is a real memoQ 12 export, made of
+  test sentences.
+
 ## Confidentiality
 
 Same rule as the Trados repo: **never use real client names.** `Acme` for a client,

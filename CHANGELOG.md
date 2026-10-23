@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Added
+
+- ★ **Remove MT marks from an exported file.** memoQ remembers which rows were filled by machine translation – from Supervertaler or any other engine – and keeps saying so in the Review pane, in the edit distance report and in every bilingual export, even after you have rewritten and confirmed the row. A new command on the editor's *memoQ* menu, *Remove MT marks from an exported file*, takes these marks out of a memoQ XLIFF you exported (.mqxlz or .mqxliff) and writes a clean copy beside it. Translation memory matches, your text and everything else stay exactly as they were, and the report lists which engines' marks were removed. To bring the clean document back into memoQ, remove the document from the project and import the clean copy with *Import with options*, as a new document; the editor shows the steps. Imported over the existing document, memoQ keeps the old marks. This works in local projects and projects from a package; a memoQ server project does not let you remove documents.
+
 ## [0.1.24] – 2026-10-22
 
 ### Fixed

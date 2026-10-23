@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Supervertaler.Core;
 using Supervertaler.MemoQ.Core;
@@ -246,6 +247,10 @@ namespace Supervertaler.PromptEditor
             memoqMenu.DropDownItems.Add(new ToolStripMenuItem("&AutoPrompt…", null, (s, e) => DraftForProject())
             {
                 ToolTipText = "AutoPrompt: have the AI write a prompt tailored to the document open in memoQ"
+            });
+            memoqMenu.DropDownItems.Add(new ToolStripMenuItem("&Remove MT marks from an exported file…", null, async (s, e) => await RemoveMtMarksAsync())
+            {
+                ToolTipText = "Clean a memoQ XLIFF you exported, so that its rows no longer say they came from machine translation"
             });
             memoqMenu.DropDownItems.Add(new ToolStripSeparator());
             memoqMenu.DropDownItems.Add(new ToolStripMenuItem("&Termbases…", null, (s, e) => ShowTermbases())
@@ -1971,6 +1976,113 @@ namespace Supervertaler.PromptEditor
             {
                 MessageBox.Show(this, ex.Message, "Termbase from prompt", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        }
+
+        // The cleaning runs off the UI thread; this stops a second click from
+        // cleaning the same files again while the first run is writing them.
+        private bool _removingMtMarks;
+
+        private async Task RemoveMtMarksAsync()
+        {
+            if (_removingMtMarks) return;
+
+            string[] paths;
+            using (var dialog = new OpenFileDialog
+            {
+                Title = "Remove MT marks",
+                Filter = "memoQ XLIFF (*.mqxlz;*.mqxliff)|*.mqxlz;*.mqxliff",
+                Multiselect = true,
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                paths = dialog.FileNames;
+            }
+
+            _removingMtMarks = true;
+            UseWaitCursor = true;
+            _status.Text = "Removing MT marks…";
+            try
+            {
+                // A large document is ten megabytes of XML or more, read,
+                // searched and zipped again: not work for the thread that
+                // paints the window.
+                var outcomes = await Task.Run(() => paths.Select(CleanMtMarks).ToList());
+                ReportMtMarks(outcomes);
+            }
+            finally
+            {
+                UseWaitCursor = false;
+                _removingMtMarks = false;
+            }
+        }
+
+        /// <summary>One file. A failure is reported with the others rather than ending the run.</summary>
+        private static (string Path, MtMarks.Result Result, string Error) CleanMtMarks(string path)
+        {
+            try
+            {
+                return (path, MtMarks.Clean(path), null);
+            }
+            catch (Exception ex)
+            {
+                return (path, null, ex.Message);
+            }
+        }
+
+        private void ReportMtMarks(List<(string Path, MtMarks.Result Result, string Error)> outcomes)
+        {
+            var text = new StringBuilder();
+            foreach (var o in outcomes)
+            {
+                var name = Path.GetFileName(o.Path);
+                if (o.Error != null)
+                {
+                    text.AppendLine(name + ": not cleaned. " + o.Error);
+                }
+                else if (o.Result.WrittenTo == null)
+                {
+                    text.AppendLine(name + ": no MT marks in it, so nothing was written.");
+                }
+                else
+                {
+                    var engines = string.Join(", ", o.Result.Engines.Select(e => MtMarks.EngineLabel(e.Key) + ": " + e.Value));
+                    text.AppendLine(name + ": " + o.Result.Removed + " MT mark" + (o.Result.Removed == 1 ? "" : "s")
+                        + " removed (" + engines + "). The clean copy is " + Path.GetFileName(o.Result.WrittenTo) + ".");
+                }
+                text.AppendLine();
+            }
+
+            var written = outcomes.Where(o => o.Result?.WrittenTo != null).ToList();
+
+            // The step that makes it work, and the one nobody would guess:
+            // imported over the existing document, memoQ keeps the old marks.
+            if (written.Any(o => o.Result.Packaged))
+            {
+                text.AppendLine("To put a clean document back into memoQ, straight after exporting it:");
+                text.AppendLine("1. In Project home > Translations, remove the document from the project.");
+                text.AppendLine("2. On the Documents ribbon, choose Import > Import with options and pick the (clean) file. "
+                    + "Its action must say Import as new.");
+                text.AppendLine("3. Open the document and click a row: the Review tab no longer shows an inserted match.");
+                text.AppendLine();
+                text.AppendLine("Importing the clean file over the existing document does not work: memoQ keeps the old marks. "
+                    + "Anything changed in memoQ between the export and the import is lost. "
+                    + "Keep the original export: imported as new, it brings the document back as it was. "
+                    + "A memoQ server (online) project does not let you remove documents.");
+            }
+
+            if (written.Any(o => !o.Result.Packaged))
+            {
+                if (written.Any(o => o.Result.Packaged)) text.AppendLine();
+                text.AppendLine("A clean .mqxliff is for delivering as it is. To put a clean document back into memoQ, "
+                    + "export it with Include skeleton and preview ticked, which saves an .mqxlz, and clean that.");
+            }
+
+            _status.Text = written.Count == 0
+                ? "No MT marks removed."
+                : "MT marks removed: " + written.Count + " clean cop" + (written.Count == 1 ? "y" : "ies") + " written.";
+
+            MessageBox.Show(this, text.ToString().TrimEnd(), "Remove MT marks", MessageBoxButtons.OK,
+                outcomes.Any(o => o.Error != null) ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
 
         /// <summary>
