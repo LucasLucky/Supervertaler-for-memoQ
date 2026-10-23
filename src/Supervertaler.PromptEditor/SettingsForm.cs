@@ -300,20 +300,32 @@ namespace Supervertaler.PromptEditor
 
             foreach (var box in boxes) box.Width = widest;
             _sendWholeDocument.Width = widest - 18;
+
+            // The fields above were laid out to the column before the checkboxes
+            // were measured, so a dialog the checkboxes widened left them
+            // stopping well short of the lines below. They are one line each and
+            // can simply be stretched; everything from here down is laid out to
+            // the dialog's own width.
+            var wide = ClientSize.Width - fieldX - 16;
+            _model.Width = wide;
+            _modelStatus.Width = wide;
+            _endpoint.Width = wide;
+            _endpointHint.Width = wide;
+
             y += 24;
             Hint("Pre-translate then only hands the segments to the chat and inserts the translations it "
-                + "sends back. Suggestions as you move through segments still use the API key.", fieldX, fieldW);
+                + "sends back. Suggestions as you move through segments still use the API key.", fieldX, wide);
             y += 14;
 
             // Not about the model, but a standing choice like the ones above, and
             // the place the first-start question says it can be changed.
             _usageStats.Text = "Send anonymous usage statistics when memoQ starts";
-            _usageStats.Left = fieldX; _usageStats.Top = y; _usageStats.Width = fieldW;
+            _usageStats.Left = fieldX; _usageStats.Top = y; _usageStats.Width = wide;
             _usageStats.AutoSize = true;
             Controls.Add(_usageStats);
             y += 24;
             Hint("A random ID, the plugin, Windows and memoQ versions and your system language - "
-                + "never your documents or translations.", fieldX, fieldW);
+                + "never your documents or translations.", fieldX, wide);
             y += 14;
 
             // The team folder is set in Supervertaler for Trados and memoQ follows
@@ -323,7 +335,7 @@ namespace Supervertaler.PromptEditor
             if (team != null)
             {
                 Caption("Team folder", y);
-                var line = Hint(team + " Set in Supervertaler for Trados.", fieldX, fieldW);
+                var line = Hint(team + " Set in Supervertaler for Trados.", fieldX, wide);
                 if (TeamFolderStatus.FellBack) line.ForeColor = Color.Firebrick;
                 y += 14;
             }
@@ -335,15 +347,15 @@ namespace Supervertaler.PromptEditor
             // once. It was here first only because it is STORED like the settings
             // below, which turned out to be the wrong test.
             Caption("API key", y);
-            _apiKey.Left = fieldX; _apiKey.Top = y; _apiKey.Width = fieldW;
+            _apiKey.Left = fieldX; _apiKey.Top = y; _apiKey.Width = wide;
             _apiKey.UseSystemPasswordChar = true;
             _apiKey.TextChanged += (s, e) => ShowKeyShape();
             Controls.Add(_apiKey);
             y += 26;
-            _apiKeySource = Hint(string.Empty, fieldX, fieldW);
+            _apiKeySource = Hint(string.Empty, fieldX, wide);
             y += 6;
             Hint("Leave it as it is to keep using the key shown. Supervertaler for Trados keeps its keys "
-                + "in the same data folder, so a key rotated there is picked up here.", fieldX, fieldW);
+                + "in the same data folder, so a key rotated there is picked up here.", fieldX, wide);
             y += 16;
 
             // The window is sized to the layout rather than the layout trusted to
