@@ -37,17 +37,31 @@ namespace Supervertaler.MemoQ.Core
         public static void EnsureShared(Action<string> log)
         {
             if (SharedSettings.InHarness) return;
-            EnsureShared(MemoryBanks.Root, log);
+            EnsureShared(MemoryBanks.Root, SupervertalerPaths.Root, log);
         }
 
         /// <summary><see cref="EnsureShared(Action{string})"/> under a given banks
-        /// folder, for tests.</summary>
-        internal static void EnsureShared(string root, Action<string> log)
+        /// folder and data folder, for tests.</summary>
+        internal static void EnsureShared(string root, string dataRoot, Action<string> log)
         {
             try
             {
                 if (string.IsNullOrEmpty(root)) return;
                 if (Directory.Exists(Path.Combine(root, MemoryBankReader.SharedBankName))) return;
+
+                // Supervertaler for Trados offers to move a bank from before
+                // there were several (memory-bank\ or supermemory\ in the data
+                // folder) into memory-banks\, but only while memory-banks\ does
+                // not exist. Making _shared first would end that offer for good
+                // and leave the old bank sending nothing. Trados waits for it
+                // too (dd5e71d); once it is moved, the next start makes _shared.
+                var legacy = Directory.Exists(root) ? null : LegacyBank(dataRoot);
+                if (legacy != null)
+                {
+                    log?.Invoke("Not making the shared memory bank yet: " + legacy
+                        + " is waiting to be moved into memory banks by Supervertaler for Trados.");
+                    return;
+                }
 
                 var made = Create(root, MemoryBankReader.SharedBankName, out var error);
                 log?.Invoke(made != null
@@ -60,6 +74,20 @@ namespace Supervertaler.MemoQ.Core
                 // bank simply contributes nothing, which is what it does empty.
                 log?.Invoke("Could not make the shared memory bank: " + ex.Message);
             }
+        }
+
+        /// <summary>The old single bank Trados has yet to move, or null. The same
+        /// two folders Trados's <c>LegacySingleBankPath</c> looks for.</summary>
+        private static string LegacyBank(string dataRoot)
+        {
+            if (string.IsNullOrEmpty(dataRoot)) return null;
+
+            foreach (var name in new[] { "memory-bank", "supermemory" })
+            {
+                var dir = Path.Combine(dataRoot, name);
+                if (Directory.Exists(dir)) return dir;
+            }
+            return null;
         }
 
         /// <summary>

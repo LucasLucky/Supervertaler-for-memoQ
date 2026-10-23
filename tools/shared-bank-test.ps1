@@ -43,14 +43,15 @@ function Make($root, $name) {
     return @{ Name = $made; Error = $argv[2] }
 }
 
-# EnsureShared(root, log), collecting what it logs.
+# EnsureShared(banks folder, data folder, log), collecting what it logs. The
+# data folder defaults to the banks folder's parent, as it is in real use.
 $script:logged = @()
 $log = [Action[string]] { param($line) $script:logged += $line }
-function Ensure($root) {
+function Ensure($root, $dataRoot = (Split-Path $root -Parent)) {
     $script:logged = @()
-    $argv = New-Object object[] 2
-    $argv[0] = [string]$root; $argv[1] = $log
-    (Method 'EnsureShared' 2).Invoke($null, $argv) | Out-Null
+    $argv = New-Object object[] 3
+    $argv[0] = [string]$root; $argv[1] = [string]$dataRoot; $argv[2] = $log
+    (Method 'EnsureShared' 3).Invoke($null, $argv) | Out-Null
 }
 
 # A client bank's context, as the plugin reads it for translation.
@@ -114,6 +115,22 @@ try {
     Check (-not $threw) 'a banks folder that cannot be written does not stop a start'
     Check ($script:logged.Count -eq 1 -and $script:logged[0] -like 'Could not make the shared memory bank*') `
         "and the log says why: $(($script:logged -join ' ') -replace '\s+', ' ')"
+
+    # ---- 4b. an old single bank Trados has yet to move ----------------------
+    # Trados offers to move memory-bank\ (or supermemory\) into memory-banks\
+    # only while memory-banks\ does not exist, so making _shared first would
+    # end the offer for good and leave the old bank sending nothing.
+    $old = Join-Path $base 'legacy'
+    New-Item -ItemType Directory -Force -Path (Join-Path $old 'supermemory') | Out-Null
+    Ensure (Join-Path $old 'memory-banks')
+    Check (-not (Test-Path (Join-Path $old 'memory-banks'))) 'with an old single bank waiting for Trados, nothing is made'
+    Check ($script:logged.Count -eq 1 -and $script:logged[0] -like 'Not making the shared memory bank yet:*supermemory*') `
+        "and the log says why: $($script:logged -join ' | ')"
+
+    # Once Trados has moved it, memory-banks\ exists and the offer is over.
+    New-Item -ItemType Directory -Force -Path (Join-Path $old 'memory-banks\old-bank') | Out-Null
+    Ensure (Join-Path $old 'memory-banks')
+    Check (Test-Path (Join-Path $old 'memory-banks\_shared\brief.md')) 'once the banks folder exists, the next start makes it'
 
     # ---- 5. never under a harness --------------------------------------------
     # The start-up call, pointed at a temp data folder that has no _shared.
