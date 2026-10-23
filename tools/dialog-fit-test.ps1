@@ -434,5 +434,58 @@ try {
         "no warning when the segment settled it"
 } finally { $quiet.Dispose() }
 
+# The report dialog (Remove MT marks): its text scrolls past a set height rather
+# than growing the window, so thirty files must fit on the screen as one does,
+# and the title bar must have the "?" that opens the documentation.
+$reportT = $asm.GetType('Supervertaler.PromptEditor.ReportDialog')
+$reportCtor = @($reportT.GetConstructors([Reflection.BindingFlags]'Public,NonPublic,Instance'))[0]
+$short = "a.mqxlz: 7 MT marks removed (Supervertaler: 7).`r`n`r`nThe clean copy is in D:\Jobs\PROJ-001\Clean."
+$long = (1..40 | ForEach-Object { "document-$_.mqxlz: 12 MT marks removed (Supervertaler: 9, DeepL MT Plugin: 3)." }) -join "`r`n"
+# The report as it really came out on 2026-10-23, which fits without scrolling -
+# and showed a scroll bar with nothing to scroll until the box was sized from
+# the lines it actually holds.
+$real = @(
+    'A-strip.txt_eng-GB.mqxlz: 7 MT marks removed (Supervertaler: 7).',
+    'B-fill.txt_eng-GB.mqxlz: no MT marks in it, so nothing was written.',
+    '',
+    'The clean copy is in D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ\tools\mt-mark-test\exports\Clean.',
+    '',
+    'To put the clean document back into memoQ, straight after exporting:',
+    '1. In Project home > Translations, select the document and remove it from the project.',
+    '2. On the Documents ribbon, choose Import > Import with options, open the Clean folder and select the file. The action must say Import as new.',
+    '3. Open the document and click a row: the Review tab no longer shows an inserted match.',
+    '',
+    'Importing over the existing document does not work: memoQ keeps the old marks. Anything changed in memoQ between the export and the import is lost. Keep the original export: imported as new, it brings the document back as before. A memoQ server (online) project does not let you remove documents.',
+    '',
+    'The ? in the title bar opens the full instructions.') -join "`r`n"
+foreach ($case in @(@('short', $short), @('real', $real), @('long', $long))) {
+    $dlg = $reportCtor.Invoke(@('Remove MT marks', $case[1], 'https://docs.supervertaler.com/memoq/remove-mt-marks/'))
+    try {
+        Realise $dlg
+        Fits $dlg "the report dialog, $($case[0]) text"
+        NoOverlaps $dlg "the report dialog, $($case[0]) text"
+        TextFits $dlg "the report dialog, $($case[0]) text"
+        Check ($dlg.HelpButton -and -not $dlg.MinimizeBox -and -not $dlg.MaximizeBox) "and its title bar shows the ? button"
+        $box = @($dlg.Controls | Where-Object { $_ -is [Windows.Forms.TextBox] })[0]
+        $screen = [Windows.Forms.Screen]::FromControl($dlg).WorkingArea.Height
+        Check ($dlg.Height -lt $screen) "and it is shorter than the screen ($($dlg.Height) of $screen px)"
+        # Every line of the text is inside the box: the last line's top plus one
+        # line is within its height, unless the box scrolls. The line height is
+        # the box's own - 15 px for a font whose Height is 16.
+        $lastIndex = [Math]::Max(0, $box.TextLength - 1)
+        $lines = $box.GetLineFromCharIndex($lastIndex) + 1
+        $lastY = $box.GetPositionFromCharIndex($lastIndex).Y
+        $lineH = if ($lines -gt 1) { [int]($lastY / ($lines - 1)) } else { $box.Font.Height }
+        $bottom = $lastY + $lineH
+        if ($case[0] -eq 'long') {
+            Check ($box.ScrollBars -eq [Windows.Forms.ScrollBars]::Vertical) "and forty files scroll inside the box"
+        } else {
+            Check ($box.ScrollBars -eq [Windows.Forms.ScrollBars]::None) "and the $($case[0]) report has no scroll bar"
+            Check ($bottom -le $box.ClientSize.Height) "and its last line is inside the box ($bottom of $($box.ClientSize.Height) px)"
+            Check (($box.ClientSize.Height - $bottom) -lt $lineH) "with no empty line's worth of space under it ($($box.ClientSize.Height - $bottom) px)"
+        }
+    } finally { $dlg.Dispose() }
+}
+
 Write-Host ''
 Write-Host "DIALOG FIT TEST COMPLETE - $fails failure(s)"

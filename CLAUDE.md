@@ -1193,7 +1193,11 @@ Anonymizer on the RWS AppStore does the same for SDLXLIFF).
 - `src/Supervertaler.PromptEditor/MtMarks.cs` removes every matchtype-1 record,
   from rows and from their earlier versions, and turns `MachineTranslated` into
   `PartiallyEdited` where it removed one. It edits the file as text, never through
-  an XML serializer, and writes a `(clean)` copy beside the original.
+  an XML serializer, and writes the copy under the same name into a `Clean`
+  folder beside the original, so that memoQ's Import dialog can take all of them
+  with Ctrl+A. The report is a `ReportDialog`: its title-bar "?" (and F1) opens
+  docs.supervertaler.com/memoq/remove-mt-marks/, as the Trados dialogs do, and
+  its text scrolls rather than growing past the screen.
 - The Python test kit (`tools/mt-mark-test/`) and its results stayed out of git.
   `tools/fixtures/memoq-export-with-mt.mqxlz` is a real memoQ 12 export, made of
   test sentences.

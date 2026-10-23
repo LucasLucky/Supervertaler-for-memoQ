@@ -53,7 +53,7 @@ namespace Supervertaler.PromptEditor
             /// <summary>Marks removed, counted by memoQ's name for the engine ("MT / DeepL MT Plugin").</summary>
             public readonly SortedDictionary<string, int> Engines = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
-            /// <summary>Where the clean copy was written; null when there was nothing to remove.</summary>
+            /// <summary>Where the clean copy was written, in the Clean folder; null when there was nothing to remove.</summary>
             public string WrittenTo;
 
             /// <summary>An .mqxlz, which carries the skeleton memoQ needs to import the document again.</summary>
@@ -84,10 +84,13 @@ namespace Supervertaler.PromptEditor
         // written back with replacement characters where its text was.
         private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
 
+        /// <summary>The folder the clean copies go into, beside the files they were made from.</summary>
+        internal const string CleanFolder = "Clean";
+
         /// <summary>
-        /// Cleans <paramref name="path"/> into a copy beside it, named with
-        /// " (clean)" (<see cref="CleanPath"/>), and never changes the original.
-        /// Writes nothing when the file holds no MT marks. Throws
+        /// Cleans <paramref name="path"/> into a copy of the same name in a
+        /// Clean folder beside it (<see cref="CleanPath"/>), and never changes
+        /// the original. Writes nothing when the file holds no MT marks. Throws
         /// <see cref="InvalidDataException"/> for a file that is not a memoQ
         /// XLIFF, and <see cref="IOException"/> when the copy cannot be written.
         /// </summary>
@@ -112,9 +115,13 @@ namespace Supervertaler.PromptEditor
             return result;
         }
 
+        // A folder of their own, under the same names, rather than a suffix beside
+        // the originals: with ten documents the clean copies would otherwise be
+        // ten files to pick one by one out of twenty in memoQ's Import dialog.
+        // In a folder of their own, Ctrl+A picks them all, and memoQ takes the
+        // document's name from inside the file anyway.
         internal static string CleanPath(string path) =>
-            Path.Combine(Path.GetDirectoryName(path) ?? "",
-                Path.GetFileNameWithoutExtension(path) + " (clean)" + Path.GetExtension(path));
+            Path.Combine(Path.GetDirectoryName(path) ?? "", CleanFolder, Path.GetFileName(path));
 
         /// <summary>memoQ's name for an engine as a translator would say it: "DeepL MT Plugin", not "MT / DeepL MT Plugin".</summary>
         internal static string EngineLabel(string source) =>

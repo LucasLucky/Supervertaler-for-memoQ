@@ -2029,7 +2029,22 @@ namespace Supervertaler.PromptEditor
             }
         }
 
+        /// <summary>The documentation page behind the report's "?": the steps, with the reasons for them.</summary>
+        internal const string MtMarksDocsUrl = "https://docs.supervertaler.com/memoq/remove-mt-marks/";
+
         private void ReportMtMarks(List<(string Path, MtMarks.Result Result, string Error)> outcomes)
+        {
+            var written = outcomes.Count(o => o.Result?.WrittenTo != null);
+            _status.Text = written == 0
+                ? "No MT marks removed."
+                : "MT marks removed: " + written + " clean cop" + (written == 1 ? "y" : "ies") + " written.";
+
+            using (var dialog = new ReportDialog("Remove MT marks", MtMarksReport(outcomes), MtMarksDocsUrl))
+                dialog.ShowDialog(this);
+        }
+
+        /// <summary>What was cleaned, where the copies went, and how to take them back into memoQ.</summary>
+        internal static string MtMarksReport(IList<(string Path, MtMarks.Result Result, string Error)> outcomes)
         {
             var text = new StringBuilder();
             foreach (var o in outcomes)
@@ -2047,42 +2062,55 @@ namespace Supervertaler.PromptEditor
                 {
                     var engines = string.Join(", ", o.Result.Engines.Select(e => MtMarks.EngineLabel(e.Key) + ": " + e.Value));
                     text.AppendLine(name + ": " + o.Result.Removed + " MT mark" + (o.Result.Removed == 1 ? "" : "s")
-                        + " removed (" + engines + "). The clean copy is " + Path.GetFileName(o.Result.WrittenTo) + ".");
+                        + " removed (" + engines + ").");
                 }
-                text.AppendLine();
             }
 
             var written = outcomes.Where(o => o.Result?.WrittenTo != null).ToList();
+            if (written.Count == 0)
+                return text.ToString().TrimEnd();
+
+            // Full paths: the next step is finding this folder in memoQ's Open
+            // dialog. Normally one, but files picked from several folders each
+            // get a Clean folder of their own.
+            var folders = written.Select(o => Path.GetDirectoryName(o.Result.WrittenTo))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            text.AppendLine();
+            text.AppendLine((written.Count == 1 ? "The clean copy is in " : "The clean copies are in ")
+                + string.Join(" and ", folders) + ".");
 
             // The step that makes it work, and the one nobody would guess:
             // imported over the existing document, memoQ keeps the old marks.
-            if (written.Any(o => o.Result.Packaged))
+            var packaged = written.Count(o => o.Result.Packaged);
+            if (packaged > 0)
             {
-                text.AppendLine("To put a clean document back into memoQ, straight after exporting it:");
-                text.AppendLine("1. In Project home > Translations, remove the document from the project.");
-                text.AppendLine("2. On the Documents ribbon, choose Import > Import with options and pick the (clean) file. "
-                    + "Its action must say Import as new.");
-                text.AppendLine("3. Open the document and click a row: the Review tab no longer shows an inserted match.");
+                var one = packaged == 1;
                 text.AppendLine();
-                text.AppendLine("Importing the clean file over the existing document does not work: memoQ keeps the old marks. "
+                text.AppendLine("To put the clean " + (one ? "document" : "documents") + " back into memoQ, straight after exporting:");
+                text.AppendLine("1. In Project home > Translations, select the " + (one ? "document and remove it" : "documents and remove them")
+                    + " from the project.");
+                text.AppendLine("2. On the Documents ribbon, choose Import > Import with options, open the Clean folder and select "
+                    + (one ? "the file" : "the files (Ctrl+A)") + ". The action must say Import as new.");
+                text.AppendLine("3. Open " + (one ? "the" : "a") + " document and click a row: the Review tab no longer shows an inserted match.");
+                text.AppendLine();
+                text.AppendLine("Importing over the existing " + (one ? "document" : "documents")
+                    + " does not work: memoQ keeps the old marks. "
                     + "Anything changed in memoQ between the export and the import is lost. "
-                    + "Keep the original export: imported as new, it brings the document back as it was. "
+                    + "Keep the original " + (one ? "export" : "exports") + ": imported as new, "
+                    + (one ? "it brings the document" : "they bring the documents") + " back as before. "
                     + "A memoQ server (online) project does not let you remove documents.");
             }
 
-            if (written.Any(o => !o.Result.Packaged))
+            if (written.Count > packaged)
             {
-                if (written.Any(o => o.Result.Packaged)) text.AppendLine();
+                text.AppendLine();
                 text.AppendLine("A clean .mqxliff is for delivering as it is. To put a clean document back into memoQ, "
                     + "export it with Include skeleton and preview ticked, which saves an .mqxlz, and clean that.");
             }
 
-            _status.Text = written.Count == 0
-                ? "No MT marks removed."
-                : "MT marks removed: " + written.Count + " clean cop" + (written.Count == 1 ? "y" : "ies") + " written.";
-
-            MessageBox.Show(this, text.ToString().TrimEnd(), "Remove MT marks", MessageBoxButtons.OK,
-                outcomes.Any(o => o.Error != null) ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+            text.AppendLine();
+            text.AppendLine("The ? in the title bar opens the full instructions.");
+            return text.ToString().TrimEnd();
         }
 
         /// <summary>

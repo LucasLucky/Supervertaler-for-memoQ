@@ -230,7 +230,7 @@ $origBytes = [IO.File]::ReadAllBytes($plain)
 $r = Clean $plain
 Check ($r.Error -eq $null) "a .mqxliff is cleaned without error $(if ($r.Error) { $r.Error.Message })"
 $written = Field $r.Result 'WrittenTo'
-Check ($written -eq (Join-Path $dir 'doc (clean).mqxliff')) "the copy is written beside it, named (clean): $written"
+Check ($written -eq (Join-Path $dir 'Clean\doc.mqxliff')) "the copy goes into a Clean folder beside it, under the same name: $written"
 Check (Same ([IO.File]::ReadAllBytes($written)) (Bytes $after $true)) "the copy is the cleaned text with its byte-order mark kept"
 Check (Same ([IO.File]::ReadAllBytes($plain)) $origBytes) "the original file is not changed"
 Check (-not (Field $r.Result 'Packaged')) "a .mqxliff is reported as unpackaged"
@@ -244,7 +244,7 @@ $nothing = Join-Path $dir 'nothing.mqxliff'
 [IO.File]::WriteAllBytes($nothing, (Bytes (Doc @($u3, $u4)) $true))
 $r = Clean $nothing
 Check ((Field $r.Result 'Removed') -eq 0 -and (Field $r.Result 'WrittenTo') -eq $null -and
-       -not (Test-Path (Join-Path $dir 'nothing (clean).mqxliff'))) "a file with no MT marks gets no copy"
+       -not (Test-Path (Join-Path $dir 'Clean\nothing.mqxliff'))) "a file with no MT marks gets no copy"
 
 # ---- 3. an .mqxlz, read back the way memoQ reads it -----------------------------
 $zipPath = Join-Path $dir 'pkg.mqxlz'
@@ -310,7 +310,7 @@ function Refused($name, $bytes, $expect) {
     $p = Join-Path $dir $name
     [IO.File]::WriteAllBytes($p, [byte[]]$bytes)
     $r = Clean $p
-    $copy = [IO.Path]::Combine($dir, [IO.Path]::GetFileNameWithoutExtension($name) + ' (clean)' + [IO.Path]::GetExtension($name))
+    $copy = [IO.Path]::Combine($dir, 'Clean', $name)
     Check ($r.Error -is [IO.InvalidDataException] -and $r.Error.Message -like $expect -and -not (Test-Path $copy)) `
         "$name is refused ($(if ($r.Error) { $r.Error.Message } else { 'no error' })) and no copy is written"
 }
@@ -334,16 +334,61 @@ Check ($r.Error -ne $null -and $r.Error.Message.Length -gt 0) "a missing file is
 # that file, the original and the folder as they were.
 $blocked = Join-Path $dir 'blocked.mqxliff'
 [IO.File]::WriteAllBytes($blocked, (Bytes $before $true))
-$blockedCopy = Join-Path $dir 'blocked (clean).mqxliff'
+$blockedCopy = Join-Path $dir 'Clean\blocked.mqxliff'
+New-Item -ItemType Directory -Force -Path (Join-Path $dir 'Clean') | Out-Null
 [IO.File]::WriteAllText($blockedCopy, 'keep me')
 (Get-Item $blockedCopy).IsReadOnly = $true
 $r = Clean $blocked
 Check ($r.Error -is [IO.IOException]) "a copy that cannot be written is an error: $(if ($r.Error) { $r.Error.Message } else { 'none' })"
 Check ([IO.File]::ReadAllText($blockedCopy) -eq 'keep me') "the file in the way is not changed"
-Check (@(Get-ChildItem $dir -Filter '*.tmp').Count -eq 0) "no temporary file is left behind"
+Check (@(Get-ChildItem $dir -Recurse -Filter '*.tmp').Count -eq 0) "no temporary file is left behind"
 (Get-Item $blockedCopy).IsReadOnly = $false
 
-# ---- 5. scale: a long document ----------------------------------------------------
+# ---- 5. the report: where the copies are, and the step that makes it work -------
+$mainT = $editor.GetType('Supervertaler.PromptEditor.MainForm')
+$reportM = $mainT.GetMethod('MtMarksReport', $Static)
+$tupT = [Type]::GetType('System.ValueTuple`3, mscorlib').MakeGenericType(@([string], $resultT, [string]))
+
+function MakeResult($removed, $writtenTo, $packaged) {
+    $r = [Activator]::CreateInstance($resultT)
+    $resultT.GetField('Removed').SetValue($r, [int]$removed)
+    $resultT.GetField('WrittenTo').SetValue($r, $writtenTo)
+    $resultT.GetField('Packaged').SetValue($r, [bool]$packaged)
+    if ($removed -gt 0) { (Field $r 'Engines').Add('MT / Supervertaler', [int]$removed) }
+    return $r
+}
+
+# Each item: path, result (or $null), error (or $null).
+function Report($items) {
+    $list = [Activator]::CreateInstance([Collections.Generic.List`1].MakeGenericType(@($tupT)))
+    foreach ($i in $items) { $list.Add([Activator]::CreateInstance($tupT, [object[]]@($i[0], $i[1], $i[2]))) }
+    return $reportM.Invoke($null, [object[]]@(,$list))
+}
+
+$jobs = 'D:\Jobs\PROJ-001\exports'
+$one = Report @(, @("$jobs\a.mqxlz", (MakeResult 7 "$jobs\Clean\a.mqxlz" $true), $null))
+Check ($one -like '*a.mqxlz: 7 MT marks removed (Supervertaler: 7).*') "one file: what was removed, by engine"
+Check ($one -like "*The clean copy is in $jobs\Clean.*") "the Clean folder is given as a full path"
+Check ($one -like '*select the document and remove it*' -and $one -like '*Import as new*' -and $one -notlike '*Ctrl+A*') "the steps are worded for one document"
+Check ($one -like '*memoQ keeps the old marks*') "it warns that an update does not work"
+
+$several = Report @(
+    @("$jobs\a.mqxlz", (MakeResult 7 "$jobs\Clean\a.mqxlz" $true), $null),
+    @("$jobs\b.mqxlz", (MakeResult 3 "$jobs\Clean\b.mqxlz" $true), $null),
+    @("$jobs\c.mqxlz", (MakeResult 0 $null $true), $null),
+    @("$jobs\d.mqxlz", $null, 'd.mqxlz is not a memoQ XLIFF file.'))
+Check ($several -like '*c.mqxlz: no MT marks in it, so nothing was written.*') "a file without marks is listed as such"
+Check ($several -like '*d.mqxlz: not cleaned. d.mqxlz is not a memoQ XLIFF file.*') "a failure is listed with its reason"
+Check (([regex]::Matches($several, [regex]::Escape("$jobs\Clean"))).Count -eq 1) "one folder is named once, however many files"
+Check ($several -like '*documents and remove them*' -and $several -like '*(Ctrl+A)*') "the steps are worded for several documents"
+
+$none = Report @(, @("$jobs\c.mqxlz", (MakeResult 0 $null $true), $null))
+Check ($none -notlike '*Import as new*') "with nothing written there are no steps to follow"
+
+$plainOnly = Report @(, @("$jobs\e.mqxliff", (MakeResult 2 "$jobs\Clean\e.mqxliff" $false), $null))
+Check ($plainOnly -like '*for delivering as it is*' -and $plainOnly -notlike '*Import as new*') "a plain .mqxliff gets the delivery note, not the import steps"
+
+# ---- 6. scale: a long document ----------------------------------------------------
 # The largest real export seen had 5,141 rows in 10 MB. Twenty thousand rows, a
 # third of them MT, must still take seconds, not minutes.
 $many = New-Object Text.StringBuilder
