@@ -2,7 +2,7 @@
 # wrapped the way memoQ expects, and that the store call returns indices.
 $ErrorActionPreference = 'Stop'
 $MemoQPath = 'C:\Program Files\memoQ\memoQ-12'
-$PluginDll = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll'
+$PluginDll = "$(Split-Path -Parent $PSScriptRoot)\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll"
 
 $script:probed = @{}
 [AppDomain]::CurrentDomain.add_AssemblyResolve([System.ResolveEventHandler] {
@@ -113,7 +113,7 @@ $settingsType = $plugin.GetType('Supervertaler.MemoQ.Settings.SupervertalerGener
 $settings = [Activator]::CreateInstance($settingsType)
 
 $build = $builder.GetMethod('Build', $PublicStatic)
-$args = [object[]]@($bundle, $settings, 'eng', 'nld', $null, $null, $null, 'Translate.', $null, $off, $null)
+$args = [object[]]@($bundle, $settings, 'eng', 'nld', $null, $null, $null, 'Translate.', $null, $off, $null, $null)
 $built = $build.Invoke($null, $args)
 $system = GetM $built 'User'
 
@@ -129,7 +129,7 @@ Write-Host "$(if ($ownI -and $noAuthI) {'PASS'} else {'FAIL'}) interactive match
 
 # Document context off must not discard it.
 SetM $settingsType $settings 'UseDocumentContext' $false
-$built2 = $build.Invoke($null, [object[]]@($bundle, $settings, 'eng', 'nld', $null, $null, $null, 'Translate.', $null, $off, $null))
+$built2 = $build.Invoke($null, [object[]]@($bundle, $settings, 'eng', 'nld', $null, $null, $null, 'Translate.', $null, $off, $null, $null))
 $system2 = GetM $built2 'User'
 $stillThere = $system2 -like '*TRANSLATION MEMORY MATCH*REFERENCE ONLY*'
 Write-Host "$(if ($stillThere) {'PASS'} else {'FAIL'}) survives document context being switched off"
@@ -137,7 +137,7 @@ SetM $settingsType $settings 'UseDocumentContext' $true
 # A bundle with no fuzzy item must produce no header.
 $empty = [Activator]::CreateInstance($bundleType)
 SetM $bundleType $empty 'Source' (Seg 'Plain segment.')
-$built3 = $build.Invoke($null, [object[]]@($empty, $settings, 'eng', 'nld', $null, $null, $null, 'Translate.', $null, $off, $null))
+$built3 = $build.Invoke($null, [object[]]@($empty, $settings, 'eng', 'nld', $null, $null, $null, 'Translate.', $null, $off, $null, $null))
 $system3 = GetM $built3 'User'
 Write-Host "$(if (-not ($system3 -like '*TRANSLATION MEMORY MATCH*')) {'PASS'} else {'FAIL'}) no header without a match"
 

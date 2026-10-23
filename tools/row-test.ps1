@@ -1,7 +1,7 @@
 # Row identity and status, and the fragment rule that makes MatchPatch usable.
 $ErrorActionPreference = 'Stop'
 $MemoQPath = 'C:\Program Files\memoQ\memoQ-12'
-$PluginDll = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll'
+$PluginDll = "$(Split-Path -Parent $PSScriptRoot)\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll"
 
 $script:probed = @{}
 [AppDomain]::CurrentDomain.add_AssemblyResolve([System.ResolveEventHandler] {
@@ -48,7 +48,7 @@ function UserPromptFor([string]$sourceText, $status) {
         $bundleType.GetField('SegmentContext').SetValue($bundle, $items)
     }
 
-    $built = $build.Invoke($null, [object[]]@($bundle, $settings, 'eng', 'nld', $null, $null, $null, 'Translate.', $null, $off, $null))
+    $built = $build.Invoke($null, [object[]]@($bundle, $settings, 'eng', 'nld', $null, $null, $null, 'Translate.', $null, $off, $null, $null))
     return $built.GetType().GetProperty('User').GetValue($built)
 }
 

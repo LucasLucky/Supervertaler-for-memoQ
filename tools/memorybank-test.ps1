@@ -11,7 +11,7 @@
 # snapshots the two files this touches regardless.
 $ErrorActionPreference = 'Stop'
 $MemoQPath = 'C:\Program Files\memoQ\memoQ-12'
-$Root      = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ'
+$Root      = Split-Path -Parent $PSScriptRoot
 $PluginDll = "$Root\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll"
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -297,7 +297,7 @@ try {
 
     $general = [Activator]::CreateInstance($generalT)
     $built = $pb.GetMethod('Build', $Static).Invoke($null,
-        @($bundle, $general, 'eng', 'nld', $null, $null, $null, 'INSTRUCTIONS', $marker, $off, $null))
+        @($bundle, $general, 'eng', 'nld', $null, $null, $null, 'INSTRUCTIONS', $marker, $off, $null, $null))
 
     $sys = $built.GetType().GetProperty('System').GetValue($built)
     $usr = $built.GetType().GetProperty('User').GetValue($built)
