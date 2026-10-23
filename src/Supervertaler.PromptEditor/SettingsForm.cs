@@ -36,6 +36,7 @@ namespace Supervertaler.PromptEditor
         private readonly CheckBox _useTerminology = new CheckBox();
         private readonly CheckBox _useDocumentContext = new CheckBox();
         private readonly CheckBox _sendMemoryBank = new CheckBox();
+        private readonly CheckBox _keepRepetitions = new CheckBox();
         private readonly CheckBox _bridgeMode = new CheckBox();
         private readonly CheckBox _usageStats = new CheckBox();
         private readonly TextBox _apiKey = new TextBox();
@@ -259,6 +260,11 @@ namespace Supervertaler.PromptEditor
             Controls.Add(_sendMemoryBank);
             y += 26;
 
+            _keepRepetitions.Text = "Keep repetitions consistent in Pre-translate";
+            _keepRepetitions.Left = fieldX; _keepRepetitions.Top = y; _keepRepetitions.Width = fieldW;
+            Controls.Add(_keepRepetitions);
+            y += 26;
+
             _bridgeMode.Text = "Pre-translate via Claude Desktop (MCP) instead of the API key";
             _bridgeMode.Left = fieldX; _bridgeMode.Top = y; _bridgeMode.Width = fieldW;
             Controls.Add(_bridgeMode);
@@ -271,7 +277,7 @@ namespace Supervertaler.PromptEditor
             // Measured rather than widened by a guess, so that a larger UI font or a
             // higher DPI cannot clip them again. The dialog grows if it has to; the
             // buttons are placed off ClientSize.Width further down and follow.
-            var boxes = new[] { _useTerminology, _useDocumentContext, _sendMemoryBank, _bridgeMode };
+            var boxes = new[] { _useTerminology, _useDocumentContext, _sendMemoryBank, _keepRepetitions, _bridgeMode };
             var widest = 0;
             foreach (var box in boxes)
             {
@@ -711,6 +717,7 @@ namespace Supervertaler.PromptEditor
             _useTerminology.Checked = SharedSettings.UseTerminologyContextOr(true);
             _useDocumentContext.Checked = SharedSettings.UseDocumentContextOr(true);
             _sendMemoryBank.Checked = SharedSettings.SendMemoryBank;
+            _keepRepetitions.Checked = SharedSettings.KeepRepetitionsConsistent;
             _bridgeMode.Checked = SharedSettings.BridgeMode;
             _usageStats.Checked = SharedSettings.UsageStats;
 
@@ -738,6 +745,7 @@ namespace Supervertaler.PromptEditor
             SharedSettings.UseTerminologyContext = _useTerminology.Checked;
             SharedSettings.UseDocumentContext = _useDocumentContext.Checked;
             SharedSettings.SendMemoryBank = _sendMemoryBank.Checked;
+            SharedSettings.KeepRepetitionsConsistent = _keepRepetitions.Checked;
             SharedSettings.BridgeMode = _bridgeMode.Checked;
             SharedSettings.ShowAllModels = _showAllModels.Checked;
             // Only a change is recorded: saving other settings must not count as

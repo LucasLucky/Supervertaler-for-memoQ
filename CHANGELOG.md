@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Added
+
+- ★ **Pre-translate now gives the same sentence the same translation every time it occurs.** The model translates each occurrence of a repeated sentence on its own and could word them differently – "the cover is fitted" in one place, "the cover is mounted" in another – so a delivered file could hold two translations of one sentence. Every segment still goes to the model exactly as before, but each later occurrence now gets the translation the first one got, with its own tags in the same places. A repetition whose own translation failed gets it too, rather than being left empty. This works across all the documents and batches of one Pre-translate; a Pre-translate started within a minute of the previous one counts as part of it. In *Translation results*, such a segment's line ends *same translation as an earlier repetition in this run*. The segment you click into still gets the model's own suggestion. On by default: the box is *Keep repetitions consistent in Pre-translate*, in the options dialog and in the prompt editor's Settings. Two things it cannot do: a sentence memoQ fills from its own translation memory is never sent to Supervertaler, so its repetitions cannot copy it, and translations already in the document are never changed.
+
 ## [0.1.24] – 2026-10-22
 
 ### Fixed

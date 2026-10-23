@@ -149,7 +149,7 @@ Check ("$($detector.GetMethod('Current', $NonPublicStatic).Invoke($null, @()))" 
 $sessionSrc = Get-Content "$Bin\Supervertaler.MemoQ\SupervertalerSession.cs" -Raw
 $batchSrc = Get-Content "$Bin\Supervertaler.MemoQ\Core\BatchTranslator.cs" -Raw
 $arrays = [regex]::Matches($sessionSrc, 'TranslateCorrectSegment\(\s*Segment\[\][^)]*\)\s*\{(?<body>[^}]*)\}')
-Check ($arrays.Count -eq 2 -and @($arrays | Where-Object { $_.Groups['body'].Value -match 'OriginIfBridged\(\)' }).Count -eq 2) `
+Check ($arrays.Count -eq 2 -and @($arrays | Where-Object { $_.Groups['body'].Value -match 'OriginIfNeeded\(\)' }).Count -eq 2) `
     "both array overloads read the origin where memoQ called them, before Task.Run"
 Check ($batchSrc -match 'if \(context\.General\.BridgeMode && origin != LookupOrigin\.Grid\)') `
     "bridge mode captures everything except a recognised grid lookup"

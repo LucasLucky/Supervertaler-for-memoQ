@@ -47,6 +47,7 @@ namespace Supervertaler.MemoQ.Settings
         private readonly CheckBox _useTerminology = new CheckBox();
         private readonly CheckBox _useDocumentContext = new CheckBox();
         private readonly CheckBox _sendMemoryBank = new CheckBox();
+        private readonly CheckBox _keepRepetitions = new CheckBox();
         private readonly CheckBox _bridgeMode = new CheckBox();
         private readonly CheckBox _quickTerm = new CheckBox();
         private readonly Button _test = new Button();
@@ -268,6 +269,13 @@ namespace Supervertaler.MemoQ.Settings
             _sendMemoryBank.Text = "Send the memory bank to the model";
             _sendMemoryBank.Left = fieldX; _sendMemoryBank.Top = y; _sendMemoryBank.AutoSize = true;
             Controls.Add(_sendMemoryBank);
+            y += 24;
+
+            // The same sentence gets the same translation throughout a
+            // Pre-translate (PreTranslateRuns). On by default, as in Trados.
+            _keepRepetitions.Text = "Keep repetitions consistent in Pre-translate";
+            _keepRepetitions.Left = fieldX; _keepRepetitions.Top = y; _keepRepetitions.AutoSize = true;
+            Controls.Add(_keepRepetitions);
             y += 24;
 
             // Named for the question it answers — who translates? — rather than
@@ -509,6 +517,7 @@ namespace Supervertaler.MemoQ.Settings
             _useTerminology.Checked = SharedSettings.UseTerminologyContextOr(g.UseTerminologyContext);
             _useDocumentContext.Checked = SharedSettings.UseDocumentContextOr(g.UseDocumentContext);
             _sendMemoryBank.Checked = SharedSettings.SendMemoryBank;
+            _keepRepetitions.Checked = SharedSettings.KeepRepetitionsConsistent;
             _bridgeMode.Checked = SharedSettings.BridgeModeOr(g.BridgeMode);
             _quickTerm.Checked = SharedSettings.QuickTermHotkey;
 
@@ -1195,6 +1204,7 @@ namespace Supervertaler.MemoQ.Settings
             SharedSettings.UseTerminologyContext = _useTerminology.Checked;
             SharedSettings.UseDocumentContext = _useDocumentContext.Checked;
             SharedSettings.SendMemoryBank = _sendMemoryBank.Checked;
+            SharedSettings.KeepRepetitionsConsistent = _keepRepetitions.Checked;
             SharedSettings.BridgeMode = _bridgeMode.Checked;
             SharedSettings.QuickTermHotkey = _quickTerm.Checked;
             SharedSettings.ShowAllModels = _showAllModels.Checked;

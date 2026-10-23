@@ -41,7 +41,7 @@ namespace Supervertaler.MemoQ
 
         public TranslationResult[] TranslateCorrectSegment(Segment[] segs, Segment[] tmSources, Segment[] tmTargets)
         {
-            return TranslateMany(segs, tmSources, tmTargets, null, OriginIfBridged());
+            return TranslateMany(segs, tmSources, tmTargets, null, OriginIfNeeded());
         }
 
         // ---- ISessionWithMetadata ---------------------------------------------
@@ -57,7 +57,7 @@ namespace Supervertaler.MemoQ
         public TranslationResult[] TranslateCorrectSegment(
             Segment[] segs, Segment[] tmSources, Segment[] tmTargets, MTRequestMetadata metadata)
         {
-            var origin = OriginIfBridged();
+            var origin = OriginIfNeeded();
             _context.NoteMetadata(metadata);
             LogMetadataOnce(metadata);
             return TranslateMany(segs, tmSources, tmTargets, metadata, origin);
@@ -66,13 +66,32 @@ namespace Supervertaler.MemoQ
         // ---- shared -----------------------------------------------------------
 
         /// <summary>
-        /// Who in memoQ is asking, read only when bridge mode needs it. Read here,
-        /// at the entry memoQ called, because the batch runs under Task.Run, where
-        /// memoQ's frames are no longer on the stack (<see cref="LookupOriginDetector"/>).
+        /// Who in memoQ is asking, read only when bridge mode or consistent
+        /// repetitions need it. Read here, at the entry memoQ called, because the
+        /// batch runs under Task.Run, where memoQ's frames are no longer on the
+        /// stack (<see cref="LookupOriginDetector"/>).
         /// </summary>
-        private LookupOrigin OriginIfBridged()
+        private LookupOrigin OriginIfNeeded()
         {
-            return _context.General.BridgeMode ? LookupOriginDetector.Current() : LookupOrigin.Unknown;
+            return _context.General.BridgeMode || SharedSettings.KeepRepetitionsConsistent
+                ? LookupOriginDetector.Current()
+                : LookupOrigin.Unknown;
+        }
+
+        /// <summary>
+        /// Whether this call takes part in its language pair's Pre-translate run
+        /// (<see cref="PreTranslateRuns"/>). A grid lookup does not: the row the
+        /// translator is on gets the model's own suggestion, and does not decide
+        /// what the next Pre-translate writes. Nor does bridge mode, whose
+        /// Pre-translate only captures and serves staged translations - and those
+        /// are keyed by source, so a repetition gets the same one anyway. Unknown
+        /// counts as Pre-translate: a renamed caller in a future memoQ can at
+        /// worst give a lookup a run's translation, which is still a translation
+        /// of that row.
+        /// </summary>
+        private bool KeepsRepetitions(LookupOrigin origin)
+        {
+            return origin != LookupOrigin.Grid && !_context.General.BridgeMode && SharedSettings.KeepRepetitionsConsistent;
         }
 
         /// <summary>
@@ -102,6 +121,23 @@ namespace Supervertaler.MemoQ
                 return paused;
             }
 
+            // Held for the whole call, model requests included, and left in the
+            // using's finally: a call that threw must still leave, or its run
+            // would never end. Aligned after the session's own fallback too, so
+            // every path a row can take is covered.
+            using (var run = KeepsRepetitions(origin)
+                       ? PreTranslateRuns.Enter(_context.SourceLangCode + "-" + _context.TargetLangCode)
+                       : null)
+            {
+                var results = TranslateAll(segs, tmSources, tmTargets, metadata, origin);
+                return run == null ? results : Repetitions.Align(run.Repetitions, segs, results);
+            }
+        }
+
+        private TranslationResult[] TranslateAll(
+            Segment[] segs, Segment[] tmSources, Segment[] tmTargets, MTRequestMetadata metadata,
+            LookupOrigin origin)
+        {
             try
             {
                 // The index is what carries the fuzzy match through: memoQ's TM
