@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Fixed
+
+- **A licence key you enter is kept, and deactivating sticks.** On some computers a licence key entered in the editor was gone again the next time memoQ started, so it had to be entered again, and each time used up another of the key's activations. Deactivating a licence on such a computer did not stick either. Both now work on every computer.
+
 ## [0.1.26] – 2026-10-24
 
 ### Added
