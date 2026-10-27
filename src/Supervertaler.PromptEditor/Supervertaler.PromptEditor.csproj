@@ -20,7 +20,7 @@
     <Product>Supervertaler for memoQ</Product>
     <Description>Prompts, glossary and settings for Supervertaler for memoQ</Description>
     <Copyright>Copyright (c) 2026 Michael Beijer</Copyright>
-    <Version>0.1.24</Version>
+    <Version>0.1.26</Version>
     <ApplicationIcon>..\Supervertaler.MemoQ\Resources\sv-icon.ico</ApplicationIcon>
     <!-- Declares DPI awareness, so the window is not bitmap-stretched into
          blur on a scaled display. See app.manifest. -->
@@ -143,6 +143,9 @@
     </Compile>
     <Compile Include="..\Supervertaler.MemoQ\Core\DefaultPrompts.cs">
       <Link>Shared\DefaultPrompts.cs</Link>
+    </Compile>
+    <Compile Include="..\Supervertaler.MemoQ\Core\BankFolder.cs">
+      <Link>Shared\BankFolder.cs</Link>
     </Compile>
     <Compile Include="..\Supervertaler.MemoQ\Core\MemoryBankChoice.cs">
       <Link>Shared\MemoryBankChoice.cs</Link>

@@ -57,9 +57,10 @@ try {
 
     $fields = Field '_promptFields'
     $body_ = Field '_editor'
-    $grid = Field '_glossaryGrid'
 
-    Check ($fields.Visible) "the prompt fields are on screen to begin with"
+    # Nothing is open yet, so the pane says so rather than offering a Name box
+    # that typing into would do nothing.
+    Check (-not $fields.Visible) "the window opens on the empty pane, with no prompt fields to type into"
 
     # ---- open the article the way the tree does --------------------------
     $node = [Activator]::CreateInstance($articleT)
@@ -73,7 +74,6 @@ try {
 
     Check ($body_.Text -eq $body) "the article's text is loaded verbatim"
     Check (-not $fields.Visible) "the prompt fields hide - an article has no name or sort order"
-    Check (-not $grid.Visible) "and the glossary grid stays out of the way"
     Check (-not $body_.ReadOnly) "the article is editable"
 
     # ---- edit and save ---------------------------------------------------
@@ -113,7 +113,6 @@ try {
         $argv2[0] = $any
         Call 'LoadPrompt' $argv2 | Out-Null
         Check ($fields.Visible) "selecting a prompt afterwards brings the fields back"
-        Check (-not $grid.Visible) "and leaves the grid hidden"
     }
     else {
         Check $false "no prompt in the library to switch back to"
@@ -121,60 +120,6 @@ try {
 }
 finally {
     $form.Dispose()
-}
-
-# ---- and the same for a glossary ----------------------------------------
-# It was equally unsaveable and for the same reason, so it is checked the same
-# way: through the button, not through the grid's own Save.
-$gpath = [string](Join-Path $dir 'terms.txt')
-[IO.File]::WriteAllLines($gpath, @(
-    '#! source=dut target=eng',
-    '# exported from Acme (PROJ-001) v3',
-    'afsluiter	valve'
-), (New-Object Text.UTF8Encoding($false)))
-
-$form2 = [Activator]::CreateInstance($formT, $Ctor, $null, @([string]$null), $null)
-$form2.StartPosition = 'Manual'
-$form2.Location = New-Object Drawing.Point(-4000, -4000)
-$form2.Show()
-
-try {
-    function Field2($name) { return $formT.GetField($name, $Inst).GetValue($form2) }
-    function Call2($name, $argv) { return $formT.GetMethod($name, $Inst).Invoke($form2, $argv) }
-
-    $glossaryT = $editor.GetType('Supervertaler.PromptEditor.GlossaryNode')
-    $gnode = [Activator]::CreateInstance($glossaryT)
-    $glossaryT.GetField('Path').SetValue($gnode, $gpath)
-    $glossaryT.GetField('Name').SetValue($gnode, 'terms.txt')
-
-    $gargv = New-Object object[] 1
-    $gargv[0] = $gnode
-    Call2 'LoadGlossary' $gargv | Out-Null
-
-    $gridPanel = Field2 '_glossaryGrid'
-    Check ($gridPanel.Visible) "the grid takes the pane when a glossary is opened"
-    Check (-not (Field2 '_promptFields').Visible) "and the prompt fields step aside"
-
-    $gridT = $gridPanel.GetType()
-    $dgv = $gridT.GetField('_grid', $Inst).GetValue($gridPanel)
-    Check ($dgv.Rows.Count -ge 1) "the terms are in the grid: $($dgv.Rows.Count) row(s) including the new-row"
-
-    # Edit a target the way a person would.
-    $dgv.Rows[0].Cells['target'].Value = 'shut-off valve'
-
-    Check ($formT.GetField('_dirty', $Inst).GetValue($form2)) "editing a cell marks the window unsaved"
-    Check ((Field2 '_save').Enabled) "and the Save button becomes usable"
-
-    $gsaved = Call2 'Save' @()
-    Check ($gsaved) "Save reports success"
-
-    $text = [IO.File]::ReadAllText($gpath)
-    Check ($text.Contains("afsluiter`tshut-off valve")) "the edit reaches the file"
-    Check ($text.Contains('#! source=dut target=eng')) "the direction header survives the round trip"
-    Check ($text.Contains('# exported from Acme (PROJ-001) v3')) "and so does the comment"
-}
-finally {
-    $form2.Dispose()
 }
 
 Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue

@@ -1,7 +1,4 @@
-﻿using System;
-using System.IO;
-using System.Text;
-using System.Windows.Forms;
+﻿using System.Windows.Forms;
 using Supervertaler.Core;
 using Supervertaler.MemoQ.Core;
 
@@ -18,7 +15,9 @@ namespace Supervertaler.PromptEditor
     /// it at all, short of making the folder by hand.</para>
     ///
     /// <para>The folder layout and the skeleton files are core's, so a bank made
-    /// here is the same as one made by Trados or Workbench.</para>
+    /// here is the same as one made by Trados or Workbench. The making itself is
+    /// <see cref="BankFolder"/>, shared with the start-up that makes the shared
+    /// bank.</para>
     /// </summary>
     internal static class NewMemoryBank
     {
@@ -29,6 +28,10 @@ namespace Supervertaler.PromptEditor
         /// <para>Defaults to the open memoQ project's name, which is the answer
         /// nine times in ten and the reason the FigureLens link only ever offered
         /// that one. It is a default here, not the only choice.</para>
+        ///
+        /// <para>The answer can be <c>_shared</c>, if that is what was typed. The
+        /// caller must not record that as the project's bank: check
+        /// <see cref="MemoryBanks.IsSharedName"/>.</para>
         /// </summary>
         public static string Ask(IWin32Window owner)
         {
@@ -47,47 +50,11 @@ namespace Supervertaler.PromptEditor
 
             if (raw == null) return null;
 
-            var name = MemoryBanks.Sanitize(raw.Trim());
-            if (name.Length == 0)
-            {
-                MessageBox.Show(owner, "That name has nothing in it that can be used for a folder.",
-                    "New memory bank", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return null;
-            }
+            var made = BankFolder.Create(MemoryBanks.Root, raw, out var error);
+            if (made == null)
+                MessageBox.Show(owner, error, "New memory bank", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
-            // DirFor answers "no such bank" with null - it does not propose a
-            // path - so it is asked only whether one is already there, and the
-            // folder to create is built here. Handing its null to CreateDirectory
-            // is a null-path exception on the one case this exists for.
-            var existing = MemoryBanks.DirFor(name);
-            var dir = existing ?? Path.Combine(MemoryBanks.Root, name);
-
-            try
-            {
-                Directory.CreateDirectory(dir);
-                Directory.CreateDirectory(Path.Combine(dir, "reference"));
-
-                // Only what is missing. Reusing a name must not overwrite a brief
-                // somebody has already written.
-                foreach (var f in new[] { "brief.md", "terminology.md", "style.md" })
-                {
-                    var file = Path.Combine(dir, f);
-                    if (!File.Exists(file))
-                        File.WriteAllText(file, MemoryBanks.SkeletonBody(f, name), new UTF8Encoding(false));
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(owner,
-                    "Could not create the memory bank folder:" + Environment.NewLine + dir
-                    + Environment.NewLine + Environment.NewLine + ex.Message,
-                    "New memory bank", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return null;
-            }
-
-            // The folder's own name, which for a bank that already existed is
-            // however it was actually spelt.
-            return Path.GetFileName(dir);
+            return made;
         }
     }
 }

@@ -70,6 +70,10 @@ namespace Supervertaler.PromptEditor
                 // has the built-in prompts in it (see DefaultPrompts).
                 Supervertaler.MemoQ.Core.DefaultPrompts.Ensure(EditorLog);
 
+                // And the shared memory bank, for the same reason: the list of
+                // banks it shows should already have it (see BankFolder).
+                Supervertaler.MemoQ.Core.BankFolder.EnsureShared(EditorLog);
+
                 try
                 {
                     Application.Run(new MainForm(args != null && args.Length > 0 ? args[0] : null));

@@ -20,7 +20,7 @@
 # the cache that wrapper restores.
 $ErrorActionPreference = 'Stop'
 $MemoQPath = 'C:\Program Files\memoQ\memoQ-12'
-$PluginDll = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll'
+$PluginDll = "$(Split-Path -Parent $PSScriptRoot)\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll"
 
 # Compiled, not a scriptblock: the plugin's tasks finish on pool threads, and a
 # scriptblock cannot run there. C# 5 - what Windows PowerShell compiles.
@@ -838,9 +838,9 @@ $bundleT.GetMember('Source')[0].SetValue($bundle, $seg)
 $builder = $plugin.GetType('Supervertaler.MemoQ.Core.PromptBuilder')
 $structureOff = [Enum]::ToObject($plugin.GetType('Supervertaler.Core.StructureContextMode'), 0)
 $gs = [Activator]::CreateInstance($generalT0)
-$single = $builder.GetMethod('Build').Invoke($null, @($bundle, $gs, 'eng', 'nld', $null, $null, $null, 'Translate well.', $null, $structureOff, $null))
+$single = $builder.GetMethod('Build').Invoke($null, @($bundle, $gs, 'eng', 'nld', $null, $null, $null, 'Translate well.', $null, $structureOff, $null, $null))
 Check ($single.User -match "Translate from English into Dutch\.\r?\n\r?\nSource segment:\r?\nSummary of the invention") "the single request restates the pair beside the segment"
-$batch = $builder.GetMethod('BuildForBatch').Invoke($null, @($gs, 'eng', 'nld', $null, $null, $null, 'Translate well.', $null, $structureOff))
+$batch = $builder.GetMethod('BuildForBatch').Invoke($null, @($gs, 'eng', 'nld', $null, $null, $null, 'Translate well.', $null, $structureOff, $null))
 Check ($batch.User.TrimEnd().EndsWith('Translate from English into Dutch.')) "and a batch ends its context with it, just before its numbered segments"
 
 # An empty translator comment is deleted; a real one stays in the target, where
@@ -931,7 +931,7 @@ $settingsT = $plugin.GetType('Supervertaler.MemoQ.Settings.SupervertalerSettings
 $settings = $settingsT.GetMethod('Create').Invoke($null,
     @([Activator]::CreateInstance($generalT), [Activator]::CreateInstance($secureT)))
 
-$editorExe = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ\src\Supervertaler.PromptEditor\bin\Release\Supervertaler.PromptEditor.exe'
+$editorExe = "$(Split-Path -Parent $PSScriptRoot)\src\Supervertaler.PromptEditor\bin\Release\Supervertaler.PromptEditor.exe"
 $editor = [Reflection.Assembly]::LoadFrom($editorExe)
 
 $dialogs = @(

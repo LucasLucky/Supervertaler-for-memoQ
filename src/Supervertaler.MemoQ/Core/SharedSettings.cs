@@ -52,6 +52,7 @@ namespace Supervertaler.MemoQ.Core
         private const string BatchSizeKey = "batchsize";
         private const string TerminologyContextKey = "useterminology";
         private const string DocumentContextKey = "usedocumentcontext";
+        private const string WholeDocumentKey = "documentcontext.whole";
         private const string SendMemoryBankKey = "sendmemorybank";
         private const string KeepRepetitionsKey = "keeprepetitions";
         private const string BankExtractKey = "bankextract";
@@ -238,6 +239,15 @@ namespace Supervertaler.MemoQ.Core
 
         public static bool UseDocumentContext { get => BoolOr(DocumentContextKey, true); set => Write(DocumentContextKey, value ? "1" : "0"); }
         public static bool UseDocumentContextOr(bool fromResource) => BoolOr(DocumentContextKey, fromResource);
+
+        /// <summary>
+        /// "Send long documents whole": the document block's limit goes from about
+        /// 25,000 tokens to about 200,000 (DocumentContext). Off unless ticked,
+        /// because every lookup then carries the whole document and a long job
+        /// costs several times as much. Only in the shared file: it is new, and
+        /// memoQ's resource has never had it.
+        /// </summary>
+        public static bool SendWholeDocument { get => BoolOr(WholeDocumentKey, false); set => Write(WholeDocumentKey, value ? "1" : "0"); }
 
         /// <summary>
         /// Whether the memory bank goes to the model at all - the chosen client

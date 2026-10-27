@@ -207,11 +207,14 @@ namespace Supervertaler.MemoQ
                 PromptBuilder.DescribeLanguage(context.SourceLangCode),
                 PromptBuilder.DescribeLanguage(context.TargetLangCode));
 
+            // The same block as Pre-translate's, so a lookup and a batch share one
+            // cached system half.
+            var document = context.DocumentContextBlock();
             var prompt = PromptBuilder.Build(
                 bundle, general, context.SourceLangCode, context.TargetLangCode,
                 context.LastMetadata, recalled, ownTerms, instructions,
                 context.KbContextBlock(),
-                structure.Mode, structure.MarkerFor(bundle.Source.PlainText));
+                structure.Mode, structure.MarkerFor(bundle.Source.PlainText), document);
 
             // Its place in the queue for a server of the translator's own:
             // someone is looking at it, and it is not sent if the translator
@@ -311,6 +314,7 @@ namespace Supervertaler.MemoQ
                     + $"recall: used {recalled?.Count ?? 0} of "
                     + $"{DocumentMemory.CountFor(context.MemoryKey)} held | "
                     + $"terms: {ownTerms?.Count ?? 0}"
+                    + Core.BatchTranslator.DescribeDocument(document)
                     + DescribeForwardedMatch(bundle)
                     + DescribeRowState(bundle));
 

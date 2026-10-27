@@ -9,7 +9,7 @@
 # should be. Hence a test.
 $ErrorActionPreference = 'Stop'
 $MemoQPath = 'C:\Program Files\memoQ\memoQ-12'
-$Root      = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ'
+$Root      = Split-Path -Parent $PSScriptRoot
 $PluginDll = "$Root\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll"
 
 $script:probed = @{}
@@ -52,7 +52,7 @@ function Meta($domain, $subject) {
 $KB = 'MEMORY-BANK-MARKER: the client prefers the formal register.'
 
 function BuildBatch($metadata) {
-    $argv = New-Object object[] 9
+    $argv = New-Object object[] 10
     $argv[0] = $general
     $argv[1] = 'eng'
     $argv[2] = 'nld'
@@ -62,6 +62,7 @@ function BuildBatch($metadata) {
     $argv[6] = 'INSTRUCTIONS-MARKER'
     $argv[7] = $KB
     $argv[8] = $off
+    $argv[9] = $null          # the document: tools/document-context-test.ps1
     return $builder.GetMethod('BuildForBatch', $Static).Invoke($null, $argv)
 }
 
@@ -103,9 +104,10 @@ $bundleT = $mt.GetType('MemoQ.MTInterfaces.TranslationBundle')
 function BuildOne($text, $metadata) {
     $bundle = [Activator]::CreateInstance($bundleT)
     $bundleT.GetField('Source').SetValue($bundle, $segB.GetMethod('CreateFromString').Invoke($null, @($text)))
-    $argv = New-Object object[] 11
+    $argv = New-Object object[] 12
     $argv[0] = $bundle; $argv[1] = $general; $argv[2] = 'eng'; $argv[3] = 'nld'; $argv[4] = $metadata
     $argv[5] = $null; $argv[6] = $null; $argv[7] = 'INSTRUCTIONS-MARKER'; $argv[8] = $KB; $argv[9] = $off; $argv[10] = $null
+    $argv[11] = $null
     return $builder.GetMethod('Build', $Static).Invoke($null, $argv)
 }
 

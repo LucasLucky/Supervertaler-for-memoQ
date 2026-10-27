@@ -321,6 +321,15 @@ namespace Supervertaler.MemoQ.Core
                 + $"{Math.Max(0, left)} left for the translator");
         }
 
+        /// <summary>
+        /// " | document: about N tokens" for a request that carried the document,
+        /// empty otherwise. On every request's line, so a bill that grew can be
+        /// traced to the document block - and its long-document box - from the
+        /// log alone.
+        /// </summary>
+        internal static string DescribeDocument(string documentBlock) =>
+            string.IsNullOrEmpty(documentBlock) ? "" : $" | document: about {documentBlock.Length / 4:N0} tokens";
+
         private static string TaggedOrNull(List<Segment> segments, int index)
         {
             if (segments == null || index < 0 || index >= segments.Count) return null;
@@ -401,10 +410,11 @@ namespace Supervertaler.MemoQ.Core
                 PromptBuilder.DescribeLanguage(context.SourceLangCode),
                 PromptBuilder.DescribeLanguage(context.TargetLangCode));
 
+            var document = context.DocumentContextBlock();
             var built = PromptBuilder.BuildForBatch(
                 general, context.SourceLangCode, context.TargetLangCode,
                 context.LastMetadata, recalled, ownTerms, instructions,
-                context.KbContextBlock(), structure.Mode);
+                context.KbContextBlock(), structure.Mode, document);
 
             // The context this batch produced goes in front of its own segments,
             // leaving the system prompt identical from one batch to the next -
@@ -516,7 +526,8 @@ namespace Supervertaler.MemoQ.Core
                 + $" out {usage.OutputTokens:N0}";
 
             PluginLog.Write($"batch: {chunk.Count} segment(s) sent, {parsed.Count} returned | "
-                + $"terms: {ownTerms?.Count ?? 0} | recall: {recalled?.Count ?? 0}" + tokens);
+                + $"terms: {ownTerms?.Count ?? 0} | recall: {recalled?.Count ?? 0}"
+                + DescribeDocument(document) + tokens);
 
             // A short reply is the failure worth catching: silently leaving the
             // tail untranslated would look like the model declining to translate

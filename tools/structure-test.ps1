@@ -9,7 +9,7 @@
 # still sees it.
 $ErrorActionPreference = 'Stop'
 $MemoQPath = 'C:\Program Files\memoQ\memoQ-12'
-$PluginDll = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll'
+$PluginDll = "$(Split-Path -Parent $PSScriptRoot)\src\Supervertaler.MemoQ\bin\Release\Supervertaler.MemoQ.dll"
 
 $script:probed = @{}
 [AppDomain]::CurrentDomain.add_AssemblyResolve([System.ResolveEventHandler] {
@@ -223,10 +223,10 @@ Check ($r[0] -eq '[[TC: note]] depressurising' -and -not $r[1]) "even one that o
 $builder = $plugin.GetType('Supervertaler.MemoQ.Core.PromptBuilder')
 $general = [Activator]::CreateInstance($generalT)
 function BuildBatch($mode) {
-    $argv = New-Object object[] 9
+    $argv = New-Object object[] 10
     $argv[0] = $general; $argv[1] = 'eng'; $argv[2] = 'nld'; $argv[3] = $null
     $argv[4] = $null; $argv[5] = $null; $argv[6] = 'CUSTOM-PROMPT-MARKER'; $argv[7] = $null
-    $argv[8] = [Enum]::Parse($modeT, $mode)
+    $argv[8] = [Enum]::Parse($modeT, $mode); $argv[9] = $null
     return $builder.GetMethod('BuildForBatch', $Static).Invoke($null, $argv)
 }
 function SystemOf($b) { return [string]$b.GetType().GetProperty('System').GetValue($b) }
