@@ -46,12 +46,18 @@ namespace Supervertaler.MemoQ
 
         // ---- ISessionWithMetadata ---------------------------------------------
 
+        // Each request is answered as its own document (EngineContext.ForRequest):
+        // memoQ sends a Pre-translate of several documents as parallel calls.
+
         public TranslationResult TranslateCorrectSegment(
             Segment segm, Segment tmSource, Segment tmTarget, MTRequestMetadata metadata)
         {
             _context.NoteMetadata(metadata);
-            LogMetadataOnce(metadata);
-            return TranslateOne(segm, tmSource, tmTarget, RowAt(metadata, 0));
+            using (_context.ForRequest(metadata))
+            {
+                LogMetadataOnce(metadata);
+                return TranslateOne(segm, tmSource, tmTarget, RowAt(metadata, 0));
+            }
         }
 
         public TranslationResult[] TranslateCorrectSegment(
@@ -59,8 +65,11 @@ namespace Supervertaler.MemoQ
         {
             var origin = OriginIfNeeded();
             _context.NoteMetadata(metadata);
-            LogMetadataOnce(metadata);
-            return TranslateMany(segs, tmSources, tmTargets, metadata, origin);
+            using (_context.ForRequest(metadata))
+            {
+                LogMetadataOnce(metadata);
+                return TranslateMany(segs, tmSources, tmTargets, metadata, origin);
+            }
         }
 
         // ---- shared -----------------------------------------------------------

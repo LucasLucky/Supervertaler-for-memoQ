@@ -20,7 +20,8 @@ $ErrorActionPreference = 'Stop'
 if (Get-Process memoQ -ErrorAction SilentlyContinue) { throw 'memoQ is running: this harness starts its own bridge and must not compete with the live one. Close memoQ first.' }
 if (Get-Process Supervertaler.MemoQ.Preview -ErrorAction SilentlyContinue) { throw 'The Supervertaler preview tool is running (an orphan if memoQ is closed): it would connect to this harness bridge and eat its commands. Stop it from the tray, or: taskkill /IM Supervertaler.MemoQ.Preview.exe /F' }
 $MemoQPath = 'C:\Program Files\memoQ\memoQ-12'
-$Root = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ'
+# Its own checkout, so a worktree's run tests that worktree's source and build.
+$Root = Split-Path $PSScriptRoot -Parent
 $Bin = "$Root\src"
 
 # Compiled, not a scriptblock: the bridge answers on thread-pool threads, where a

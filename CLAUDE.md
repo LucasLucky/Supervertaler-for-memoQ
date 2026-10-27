@@ -358,6 +358,18 @@ design and its costs are in `docs/design/whole-document-context.md`.
   passes the settings in rather than writing `shared.txt`, so it is safe while
   memoQ is open. The harnesses it touched now find the DLL relative to their own
   folder, so they test a worktree's build rather than the main checkout's.
+- **Each request is its own document (fixed 2026-10-27).** memoQ runs a
+  Pre-translate of several documents as parallel sessions through ONE engine, so
+  an engine-wide "current document" is whichever session spoke last; until
+  2026-10-27 every batch was prompted and captured as that document.
+  `SupervertalerSession` now opens `EngineContext.ForRequest(metadata)` around
+  each call: an AsyncLocal scope, so `CurrentDocument`, `MemoryKey` and
+  `LastMetadata` answer the request's own document on every thread the call
+  continues on (Task.Run, awaits). Outside a request - the store session, which
+  memoQ calls with no document - they answer the engine-wide one as before. The
+  document block, the bank block and the article choice are cached per document
+  (`PerDocument`, at most 8), or two documents in flight rebuild them at every
+  switch, and for a large bank that is a model call. `tools/multi-document-test.ps1`.
 
 ## Reading memoQ's own data off disk
 
