@@ -358,6 +358,18 @@ design and its costs are in `docs/design/whole-document-context.md`.
   passes the settings in rather than writing `shared.txt`, so it is safe while
   memoQ is open. The harnesses it touched now find the DLL relative to their own
   folder, so they test a worktree's build rather than the main checkout's.
+- **Each request is its own document (fixed 2026-10-27).** memoQ runs a
+  Pre-translate of several documents as parallel sessions through ONE engine, so
+  an engine-wide "current document" is whichever session spoke last; until
+  2026-10-27 every batch was prompted and captured as that document.
+  `SupervertalerSession` now opens `EngineContext.ForRequest(metadata)` around
+  each call: an AsyncLocal scope, so `CurrentDocument`, `MemoryKey` and
+  `LastMetadata` answer the request's own document on every thread the call
+  continues on (Task.Run, awaits). Outside a request - the store session, which
+  memoQ calls with no document - they answer the engine-wide one as before. The
+  document block, the bank block and the article choice are cached per document
+  (`PerDocument`, at most 8), or two documents in flight rebuild them at every
+  switch, and for a large bank that is a model call. `tools/multi-document-test.ps1`.
 
 ## Reading memoQ's own data off disk
 
@@ -680,6 +692,41 @@ sits in the cache.
 **Parallel requests** is two values now: `parallel` for the cloud providers and
 `parallel.local` (default 1) for Ollama and OpenAI-compatible. The dialogs show
 whichever applies, and `EngineContext.General` picks it by provider.
+
+## Consistent repetitions in Pre-translate (2026-10-23)
+
+A Pre-translate gives every repetition of a source the translation its group got
+first. Core's `RepetitionKey` and `RepetitionRun` (core 51097e2, shared with Trados);
+the design is `docs/design/consistent-repetitions.md` in the Trados repo, section 4.
+Nothing sent to the model changes. `tools/repetitions-test.ps1` checks the requests
+are byte-identical with the setting on and off, against a fake model.
+
+- **One place:** `SupervertalerSession.TranslateMany`, after the batch AND after
+  the per-row fallback, calls `Repetitions.Align`, which calls `RepetitionRun.Settle`
+  per row: the first translation a group gets in the run is its translation, and a
+  later row that was worded differently, or failed, gets that one instead.
+- **A run** (`PreTranslateRuns`) is continuous Pre-translate activity per language
+  pair (two engines per pair would split it): it ends 60 s after its last call
+  leaves, when a timer logs its summary and drops it. Each call holds a lease,
+  released in a `using`, failure paths included.
+- **Grid lookups and bridge mode stay out.** The origin is now read whenever the
+  setting is on, not only in bridge mode (`OriginIfNeeded`). Unknown counts as
+  Pre-translate.
+- **memoQ numbers a segment's tags by place, closings included.** The XML id is the
+  index in `ITags`, which is in position order: a pair is
+  `<inline_tag id="0">B</inline_tag>`, a single tag `<inline_tag id="2"/>`, a tag
+  whose partner is in another segment a bare `<inline_tag id="1">` or
+  `</inline_tag>`. So two segments with the same key have the same ids, and a group
+  translation is given to a repetition with `FromTaggedText(text, itsOwnSource)`.
+- **But a translation re-serialised is numbered afresh.** A reply that moves a tag
+  forward comes back from `ToTaggedText` with different ids from its source.
+  `TagBridge.ToTaggedTextIn` reads it in the source's numbers instead, finding each
+  tag by REFERENCE: `FromTaggedText` builds the translation from the source's own
+  `InlineTag` objects, and `InlineTag.Equals` cannot tell two bold pairs apart.
+- The key takes a tag's kind from its `Name`, never its attributes: the model never
+  sees them, and each row gets its own tags back.
+- Not possible here: a first occurrence memoQ fills from its own TM is never sent,
+  and existing targets are never visible, so there are no conflicts to list.
 
 ## Gotchas that have already bitten
 

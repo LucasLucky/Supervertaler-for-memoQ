@@ -54,6 +54,7 @@ namespace Supervertaler.MemoQ.Core
         private const string DocumentContextKey = "usedocumentcontext";
         private const string WholeDocumentKey = "documentcontext.whole";
         private const string SendMemoryBankKey = "sendmemorybank";
+        private const string KeepRepetitionsKey = "keeprepetitions";
         private const string BankExtractKey = "bankextract";
         private const string LiveLinkStartedKey = "livelinkstarted";
         private const string ShowAllModelsKey = "showallmodels";
@@ -259,6 +260,15 @@ namespace Supervertaler.MemoQ.Core
         /// chosen there, not in memoQ's resource.
         /// </summary>
         public static bool SendMemoryBank { get => BoolOr(SendMemoryBankKey, true); set => Write(SendMemoryBankKey, value ? "1" : "0"); }
+
+        /// <summary>
+        /// Whether a Pre-translate gives every repetition of a source the
+        /// translation its group got first (<c>PreTranslateRuns</c>). On
+        /// unless switched off, as in Supervertaler for Trados: two translations
+        /// of one sentence in a delivered file is the fault this exists to stop,
+        /// and nothing sent to the model changes. Only in the shared file.
+        /// </summary>
+        public static bool KeepRepetitionsConsistent { get => BoolOr(KeepRepetitionsKey, true); set => Write(KeepRepetitionsKey, value ? "1" : "0"); }
 
         /// <summary>
         /// The latest per-job extract of a large bank, as "path|summary": written

@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text.RegularExpressions;
 using MemoQ.Addins.Common.DataStructures;
 using MemoQ.Addins.Common.Utils;
 
@@ -65,6 +68,43 @@ namespace Supervertaler.MemoQ.Core
                 return SegmentBuilder.CreateFromString(StripXmlTags(text));
             }
         }
+
+        /// <summary>
+        /// A translation as tagged text in its SOURCE's tag numbers - what the
+        /// model wrote, give or take escaping - or null when one of its tags is
+        /// not one of the source's.
+        ///
+        /// <para><see cref="ToTaggedText"/> will not do here: memoQ numbers the
+        /// tags of a segment by where they stand in it, so a translation that
+        /// moves a tag forward is written with different numbers from its source
+        /// (measured 2026-10-23: a reply "X &lt;inline_tag id="2"/&gt; Y
+        /// &lt;inline_tag id="0"&gt;Z&lt;/inline_tag&gt;" re-serialises with ids 0
+        /// and 1). <see cref="FromTaggedText"/> builds the translation from the
+        /// source's own tag objects, so each is found again - by reference, since
+        /// InlineTag's Equals cannot tell two bold pairs apart.</para>
+        /// </summary>
+        public static string ToTaggedTextIn(Segment translation, Segment source)
+        {
+            var text = ToTaggedText(translation);
+            var own = translation?.ITags;
+            if (own == null || own.Length == 0) return text;
+
+            var theirs = source?.ITags ?? new InlineTag[0];
+            var traced = true;
+
+            var renumbered = TagId.Replace(text, m =>
+            {
+                var index = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+                var at = index < own.Length ? Array.FindIndex(theirs, t => ReferenceEquals(t, own[index])) : -1;
+                if (at < 0) traced = false;
+                return at < 0 ? m.Value : "<inline_tag id=\"" + at.ToString(CultureInfo.InvariantCulture) + "\"";
+            });
+
+            return traced ? renumbered : null;
+        }
+
+        /// <summary>A tag's number in memoQ's segment XML: the opening of a pair, or a single tag.</summary>
+        private static readonly Regex TagId = new Regex("<inline_tag id=\"(\\d+)\"", RegexOptions.Compiled);
 
         /// <summary>Tagged text with the tag markers removed. For analysis passes that want prose, not markup.</summary>
         public static string StripTagMarkers(string taggedText)

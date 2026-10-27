@@ -85,14 +85,12 @@ namespace Supervertaler.MemoQ.Core
         private readonly object _kbLock = new object();
         private global::Supervertaler.Core.MemoryBankReader _kbReader;
         private string _kbReaderBank;
-        private string _kbBlock;
-        private string _kbBlockKey;
+        private readonly PerDocument<string> _kbBlocks = new PerDocument<string>();
 
         // The article choice for a large bank, made once per job (see
         // BankExtract) and reused while the bank and the document stay the same,
         // so the model is asked once per job rather than once per rebuild.
-        private List<string> _articleChoice;
-        private string _articleChoiceKey;
+        private readonly PerDocument<List<string>> _articleChoices = new PerDocument<List<string>>();
 
         /// <summary>
         /// Below this much document text the article choice is not asked: a model
@@ -180,20 +178,129 @@ namespace Supervertaler.MemoQ.Core
         }
 
         /// <summary>
-        /// The document memoQ most recently asked us to translate in, or
-        /// <see cref="Guid.Empty"/> if it has never told us — which is the case
-        /// whenever it uses the plain <see cref="ISession"/> overload without
-        /// metadata. Everything keyed on this degrades to a single shared bucket
-        /// in that case, which is still better than nothing.
+        /// The document of the request being answered on this call path (see
+        /// <see cref="ForRequest"/>), else the document memoQ most recently asked
+        /// us to translate in, or <see cref="Guid.Empty"/> if it has never told us
+        /// — which is the case whenever it uses the plain <see cref="ISession"/>
+        /// overload without metadata. Everything keyed on this degrades to a
+        /// single shared bucket in that case, which is still better than nothing.
         /// </summary>
         public Guid CurrentDocument
         {
-            get { lock (_lock) return _currentDocument; }
+            get
+            {
+                var request = _request.Value?.Metadata;
+                if (request != null && request.DocumentID != Guid.Empty) return request.DocumentID;
+                lock (_lock) return _currentDocument;
+            }
         }
 
+        /// <summary>The metadata of the request being answered on this call path, else the last memoQ sent.</summary>
         public MTRequestMetadata LastMetadata
         {
-            get { lock (_lock) return _lastMetadata; }
+            get
+            {
+                var request = _request.Value?.Metadata;
+                if (request != null) return request;
+                lock (_lock) return _lastMetadata;
+            }
+        }
+
+        // The request being answered on this call path, if any (see ForRequest).
+        private readonly AsyncLocal<RequestScope> _request = new AsyncLocal<RequestScope>();
+
+        /// <summary>
+        /// Makes <paramref name="metadata"/> the request for everything this call
+        /// does until the scope is disposed, on whatever thread the work goes on.
+        ///
+        /// <para>memoQ runs a Pre-translate of several documents as parallel
+        /// sessions through one engine, and the engine-wide "last document" is
+        /// whichever of them spoke last. Before this, every batch was prompted
+        /// and filed as that one document: on 2026-10-27 the rows of document B
+        /// went out with document A's text as context, A's confirmed examples and
+        /// A's capture bucket. A scope travels with the call - an AsyncLocal flows
+        /// into Task.Run and across awaits - so each batch sees its own document,
+        /// while the confirmation path, which memoQ calls with no document at
+        /// all, keeps the engine-wide one.</para>
+        ///
+        /// <para>Disposing clears the scope as well as restoring the one before
+        /// it: a timer or thread started during the call keeps a copy, and must
+        /// fall back to the engine-wide document once the call is over.</para>
+        /// </summary>
+        public IDisposable ForRequest(MTRequestMetadata metadata)
+        {
+            return metadata == null ? null : new RequestScope(_request, metadata);
+        }
+
+        private sealed class RequestScope : IDisposable
+        {
+            private readonly AsyncLocal<RequestScope> _slot;
+            private readonly RequestScope _previous;
+            private volatile MTRequestMetadata _metadata;
+
+            public RequestScope(AsyncLocal<RequestScope> slot, MTRequestMetadata metadata)
+            {
+                _slot = slot;
+                _previous = slot.Value;
+                _metadata = metadata;
+                slot.Value = this;
+            }
+
+            public MTRequestMetadata Metadata => _metadata;
+
+            public void Dispose()
+            {
+                _metadata = null;
+                _slot.Value = _previous;
+            }
+        }
+
+        /// <summary>
+        /// A built block per document, for the few a Pre-translate has in flight
+        /// at once. With one slot, parallel sessions for two documents rebuilt it
+        /// at every switch between them - a log line each time and, for a large
+        /// bank, a fresh article choice, which is a model call. Bounded, because a
+        /// project can hold hundreds of documents: the least recently used goes.
+        /// Not thread-safe; used under the lock of the block it holds.
+        /// </summary>
+        internal sealed class PerDocument<T> where T : class
+        {
+            internal const int Keep = 8;
+
+            private sealed class Entry
+            {
+                public string Key;
+                public T Value;
+                public long Used;
+            }
+
+            private readonly Dictionary<string, Entry> _entries = new Dictionary<string, Entry>(StringComparer.Ordinal);
+            private long _clock;
+
+            /// <summary>The value built from <paramref name="key"/> for this document, null included.</summary>
+            public bool TryGet(string document, string key, out T value)
+            {
+                value = null;
+                if (!_entries.TryGetValue(document ?? string.Empty, out var entry)
+                    || !string.Equals(entry.Key, key, StringComparison.Ordinal)) return false;
+
+                entry.Used = ++_clock;
+                value = entry.Value;
+                return true;
+            }
+
+            public void Set(string document, string key, T value)
+            {
+                document = document ?? string.Empty;
+                if (!_entries.ContainsKey(document) && _entries.Count >= Keep)
+                    _entries.Remove(_entries.OrderBy(e => e.Value.Used).First().Key);
+
+                _entries[document] = new Entry { Key = key, Value = value, Used = ++_clock };
+            }
+
+            public int Count => _entries.Count;
+
+            public void Clear() => _entries.Clear();
         }
 
         /// <summary>
@@ -614,12 +721,13 @@ namespace Supervertaler.MemoQ.Core
             if (!local) document = DocumentText(out documentId, out wholeDocument);
 
             var newest = NewestWrite(dir).ToString("O");
+            var slot = local ? "local" : documentId;
             var key = string.Join("|", dir, SourceLangCode, TargetLangCode, newest,
-                                  local ? "local" : documentId, local ? "whole" : GrowthStep(document));
+                                  slot, local ? "whole" : GrowthStep(document));
 
             lock (_kbLock)
             {
-                if (string.Equals(key, _kbBlockKey, StringComparison.Ordinal)) return _kbBlock;
+                if (_kbBlocks.TryGet(slot, key, out var cached)) return cached;
 
                 try
                 {
@@ -645,8 +753,7 @@ namespace Supervertaler.MemoQ.Core
                         && document != null)
                     {
                         var choiceKey = string.Join("|", dir, newest, documentId);
-                        var earlier = string.Equals(choiceKey, _articleChoiceKey, StringComparison.Ordinal)
-                            ? _articleChoice : null;
+                        _articleChoices.TryGet(documentId, choiceKey, out var earlier);
 
                         var extract = global::Supervertaler.Core.BankExtract.Build(
                             ctx, document, SourceLangCode, TargetLangCode, PerRequestTokenBudget,
@@ -657,19 +764,16 @@ namespace Supervertaler.MemoQ.Core
                             chooserName: General.Provider + " / " + General.Model);
 
                         if (extract.ArticleChoice != null)
-                        {
-                            _articleChoice = extract.ArticleChoice;
-                            _articleChoiceKey = choiceKey;
-                        }
+                            _articleChoices.Set(documentId, choiceKey, extract.ArticleChoice);
 
-                        _kbBlock = extract.Context.HasContent
+                        var selected = extract.Context.HasContent
                             ? global::Supervertaler.Core.MemoryBankReader.FormatForPrompt(extract.Context)
                             : null;
-                        _kbBlockKey = key;
+                        _kbBlocks.Set(slot, key, selected);
                         _reportedBank = null;   // the plain "sending" line applies again if the bank shrinks
 
                         WriteExtract(extract, bank);
-                        return _kbBlock;
+                        return selected;
                     }
 
                     ctx?.TrimToTokenBudget(PerRequestTokenBudget);
@@ -678,21 +782,20 @@ namespace Supervertaler.MemoQ.Core
                     if (!SharedSettings.InHarness && SharedSettings.BankExtract.Length > 0)
                         SharedSettings.BankExtract = string.Empty;
 
-                    _kbBlock = ctx == null || !ctx.HasContent
+                    var block = ctx == null || !ctx.HasContent
                         ? null
                         : global::Supervertaler.Core.MemoryBankReader.FormatForPrompt(ctx);
-                    _kbBlockKey = key;
+                    _kbBlocks.Set(slot, key, block);
 
-                    if (_kbBlock != null) ReportBankOnce(bank, ctx);
-                    return _kbBlock;
+                    if (block != null) ReportBankOnce(bank, ctx, block);
+                    return block;
                 }
                 catch (Exception ex)
                 {
                     // The bank is optional. A job must never fail because a
                     // markdown file could not be read.
                     PluginLog.Write("Could not load memory bank " + Quote(bank), ex);
-                    _kbBlock = null;
-                    _kbBlockKey = key;
+                    _kbBlocks.Set(slot, key, null);
                     return null;
                 }
             }
@@ -742,8 +845,7 @@ namespace Supervertaler.MemoQ.Core
 
         // The document block, and what it was built from (see DocumentContextBlock).
         private readonly object _docLock = new object();
-        private string _docBlock;
-        private string _docBlockKey;
+        private readonly PerDocument<string> _docBlocks = new PerDocument<string>();
         private bool _saidDocumentLocal;
 
         /// <summary>
@@ -793,15 +895,14 @@ namespace Supervertaler.MemoQ.Core
 
             lock (_docLock)
             {
-                if (string.Equals(key, _docBlockKey, StringComparison.Ordinal)) return _docBlock;
+                if (_docBlocks.TryGet(documentId, key, out var cached)) return cached;
 
                 var built = DocumentContext.Build(rows, liveLink, whole ? DocumentContext.WholeChars : DocumentContext.NormalChars);
-                _docBlock = built?.Text;
-                _docBlockKey = key;
+                _docBlocks.Set(documentId, key, built?.Text);
                 _saidDocumentLocal = false;
 
-                if (built != null) PluginLog.Write(DescribeDocumentBlock(built, liveLink, whole));
-                return _docBlock;
+                if (built != null) PluginLog.Write(DescribeDocumentBlock(built, liveLink, whole, DocumentLabel(documentId)));
+                return built?.Text;
             }
         }
 
@@ -838,13 +939,20 @@ namespace Supervertaler.MemoQ.Core
             return capture == null || capture.Sources.Count == 0 ? null : capture.Sources;
         }
 
+        /// <summary>
+        /// A document in the log by the start of its id, never its name: several
+        /// can be in flight at once, and a file name can identify a client.
+        /// </summary>
+        private static string DocumentLabel(string documentId) =>
+            "document " + (documentId != null && documentId.Length > 8 ? documentId.Substring(0, 8) : documentId);
+
         /// <summary>Said once per rebuild, which by design is rare: what the model is shown of the document.</summary>
-        private static string DescribeDocumentBlock(DocumentContext.Result built, bool liveLink, bool whole)
+        private static string DescribeDocumentBlock(DocumentContext.Result built, bool liveLink, bool whole, string label)
         {
             var tokens = (built.Text.Length / 4).ToString("N0");
             var line = liveLink
-                ? "Document context: sending the document from the live link - " + built.Sent + " of " + built.Available + " paragraphs"
-                : "Document context: sending " + built.Sent + " of " + built.Available + " captured segments, from the start "
+                ? "Document context (" + label + "): sending the document from the live link - " + built.Sent + " of " + built.Available + " paragraphs"
+                : "Document context (" + label + "): sending " + built.Sent + " of " + built.Available + " captured segments, from the start "
                   + "of the document (the live link does not have this document, so the model sees what memoQ has sent so far)";
             line += ", about " + tokens + " tokens";
 
@@ -862,8 +970,7 @@ namespace Supervertaler.MemoQ.Core
                 _saidDocumentLocal = true;
 
                 // Forgotten, so going back to a cloud provider announces the block again.
-                _docBlock = null;
-                _docBlockKey = null;
+                _docBlocks.Clear();
             }
 
             PluginLog.Write("Document context: not sent to a local model (Ollama or an OpenAI-compatible server). "
@@ -999,7 +1106,7 @@ namespace Supervertaler.MemoQ.Core
 
             // Forget the last block, so switching back on reports the bank again
             // and does not serve a block read before the switch was turned off.
-            lock (_kbLock) { _kbBlock = null; _kbBlockKey = null; }
+            lock (_kbLock) { _kbBlocks.Clear(); }
 
             PluginLog.Write("SuperMemory: not sending the memory bank - switched off in Translation settings");
         }
@@ -1127,8 +1234,7 @@ namespace Supervertaler.MemoQ.Core
         {
             lock (_kbLock)
             {
-                _kbBlock = null;
-                _kbBlockKey = null;
+                _kbBlocks.Clear();
                 _warnedMissingBank = null;
                 _reportedBank = null;
             }
@@ -1158,7 +1264,7 @@ namespace Supervertaler.MemoQ.Core
         /// exactly why it has to be visible: a rule the translator wrote down and
         /// cannot see being applied is worse than having no bank at all.
         /// </summary>
-        private void ReportBankOnce(string bank, global::Supervertaler.Core.KbContext ctx)
+        private void ReportBankOnce(string bank, global::Supervertaler.Core.KbContext ctx, string block)
         {
             lock (_kbLock)
             {
@@ -1179,7 +1285,7 @@ namespace Supervertaler.MemoQ.Core
                 + (bank.Length == 0
                     ? "the shared defaults only, with no client bank chosen,"
                     : "memory bank " + Quote(bank))
-                + " with every request (~" + ((_kbBlock ?? string.Empty).Length / 4).ToString("N0")
+                + " with every request (~" + ((block ?? string.Empty).Length / 4).ToString("N0")
                 + " tokens)" + trimmed);
         }
     }

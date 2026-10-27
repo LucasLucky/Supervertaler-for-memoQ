@@ -20,7 +20,8 @@ $ErrorActionPreference = 'Stop'
 if (Get-Process memoQ -ErrorAction SilentlyContinue) { throw 'memoQ is running: this harness starts its own bridge and must not compete with the live one. Close memoQ first.' }
 if (Get-Process Supervertaler.MemoQ.Preview -ErrorAction SilentlyContinue) { throw 'The Supervertaler preview tool is running (an orphan if memoQ is closed): it would connect to this harness bridge and eat its commands. Stop it from the tray, or: taskkill /IM Supervertaler.MemoQ.Preview.exe /F' }
 $MemoQPath = 'C:\Program Files\memoQ\memoQ-12'
-$Root = 'D:\SynologyDrive\Dev\Sv\Supervertaler-for-memoQ'
+# Its own checkout, so a worktree's run tests that worktree's source and build.
+$Root = Split-Path $PSScriptRoot -Parent
 $Bin = "$Root\src"
 
 # Compiled, not a scriptblock: the bridge answers on thread-pool threads, where a
@@ -149,7 +150,7 @@ Check ("$($detector.GetMethod('Current', $NonPublicStatic).Invoke($null, @()))" 
 $sessionSrc = Get-Content "$Bin\Supervertaler.MemoQ\SupervertalerSession.cs" -Raw
 $batchSrc = Get-Content "$Bin\Supervertaler.MemoQ\Core\BatchTranslator.cs" -Raw
 $arrays = [regex]::Matches($sessionSrc, 'TranslateCorrectSegment\(\s*Segment\[\][^)]*\)\s*\{(?<body>[^}]*)\}')
-Check ($arrays.Count -eq 2 -and @($arrays | Where-Object { $_.Groups['body'].Value -match 'OriginIfBridged\(\)' }).Count -eq 2) `
+Check ($arrays.Count -eq 2 -and @($arrays | Where-Object { $_.Groups['body'].Value -match 'OriginIfNeeded\(\)' }).Count -eq 2) `
     "both array overloads read the origin where memoQ called them, before Task.Run"
 Check ($batchSrc -match 'if \(context\.General\.BridgeMode && origin != LookupOrigin\.Grid\)') `
     "bridge mode captures everything except a recognised grid lookup"
