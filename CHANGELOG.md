@@ -6,6 +6,12 @@ matches the Supervertaler for Trados changelog – one bold headline per bullet,
 a ★ on the things a release would be announced for – so the two read alike and
 any release tooling that buckets on these headings works for both.
 
+## [Unreleased]
+
+### Fixed
+
+- **Entering your licence key works again after a deactivation that did not register.** If the licence server had released this computer's activation without Supervertaler recording it, the licence could never be confirmed again: **Check now** answered *Could not read the licence server's reply* every time, and AI translation paused once 30 days had passed. **Check now** now says what is wrong, and the editor's **Help, Licence** window shows the key box whenever the licence has lapsed, where it used to appear only when no key had been entered. Entering the key there activates this computer afresh, and the same box takes a new key when the old one has ended.
+
 ## [0.1.27] – 2026-10-27
 
 ### Added

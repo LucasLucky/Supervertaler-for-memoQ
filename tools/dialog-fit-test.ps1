@@ -324,6 +324,23 @@ try {
     Check (-not (& $hasWarning $clean)) 'and nothing else does'
 } finally { $damaged.Dispose(); $clean.Dispose() }
 
+# A key that has lapsed keeps Check now and Deactivate, and gets the key box
+# below them: when the licence server no longer has this computer's
+# activation, entering the key again is the way back. A working licence gets
+# no key box.
+$lapsed   = [Activator]::CreateInstance($dlgT, [object[]]@((View 'Expired'  $true 0 $false)))
+$licensed = [Activator]::CreateInstance($dlgT, [object[]]@((View 'Licensed' $true 0 $false)))
+try {
+    $boxOf = { param($f) @($f.Controls | Where-Object { $_ -is [Windows.Forms.TextBox] }) }
+    $buttonOf = { param($f, $t) @($f.Controls | Where-Object { $_ -is [Windows.Forms.Button] -and $_.Text -eq $t }) }
+    $box = & $boxOf $lapsed
+    $check = & $buttonOf $lapsed 'Check now'
+    Check ($box.Count -eq 1 -and $check.Count -eq 1 -and $check[0].Bottom -le $box[0].Top) 'a lapsed key: the key box, below Check now'
+    Check ((& $buttonOf $lapsed 'Deactivate this computer').Count -eq 1) '  and Deactivate stays'
+    Check ((& $buttonOf $lapsed 'Activate').Count -eq 1 -and $lapsed.AcceptButton -eq (& $buttonOf $lapsed 'Activate')[0]) '  and Enter activates'
+    Check ((& $boxOf $licensed).Count -eq 0) 'a working licence: no key box'
+} finally { $lapsed.Dispose(); $licensed.Dispose() }
+
 # The note for a licence activated for another computer or account: shown in
 # every state but Licensed, above the key box, and the first day's headline says
 # what happened rather than "could not be read".

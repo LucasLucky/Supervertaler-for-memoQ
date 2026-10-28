@@ -198,9 +198,13 @@ namespace Supervertaler.PromptEditor
                 };
 
                 y += Math.Max(check.Height, deactivate.Height) + 12;
-                _key = null;
             }
-            else
+
+            // A key that has lapsed gets the key box too. When the licence server
+            // no longer has this computer's activation, Check now can never
+            // confirm it, and entering the key again activates it afresh; when
+            // the key itself has ended, a new one goes in here.
+            if (!view.HasKey || view.State == LicenceState.Expired)
             {
                 var caption = Paragraph("Licence key");
                 caption.ForeColor = SystemColors.GrayText;
@@ -288,8 +292,9 @@ namespace Supervertaler.PromptEditor
                 case LicenceState.Expired:
                     return v.HasKey
                         ? "AI translation is paused until the licence is confirmed online. Connect to the " +
-                          "internet and press Check now. Terminology, termbases, prompts and memory banks " +
-                          "keep working."
+                          "internet and press Check now. If that does not bring it back, enter your licence " +
+                          "key again below, or a new one if this one has ended. Terminology, termbases, " +
+                          "prompts and memory banks keep working."
                         : "AI translation is paused until a licence key is entered. Terminology, termbases, " +
                           "prompts and memory banks keep working.";
                 default:
